@@ -1,0 +1,5 @@
+{
+  "name": "灵感作家 AI (MuseWriter)",
+  "description": "一款由 AI 驱动的小说写作助手，支持世界观设定、人物档案管理及章节内容智能生成，具备上下文感知能力。",
+  "requestFramePermissions": []
+}
