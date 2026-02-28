@@ -56,6 +56,15 @@ export async function generateNovelContent(
   
   const chapterContext = previousChapters.map(c => `章节 ${c.order}: ${c.title}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
 
+  const linkedSettings = project.worldSettings.filter(s => currentChapter?.linkedContextIds?.includes(s.id));
+  const linkedCharacters = project.characters.filter(c => currentChapter?.linkedContextIds?.includes(c.id));
+
+  const linkedContext = linkedSettings.length > 0 || linkedCharacters.length > 0 ? `
+当前场景重点关注的上下文 (请务必在创作中体现这些元素):
+${linkedSettings.map(s => `- [设定] ${s.title}: ${s.content}`).join("\n")}
+${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n")}
+` : "";
+
   const systemInstruction = `
 你是一位专业的小说作家。
 你的目标是帮助用户创作他们的小说《${project.title}》。
@@ -68,6 +77,7 @@ ${characterContext}
 
 写作规则:
 ${rulesContext}
+${linkedContext}
 
 大纲 (本章情节事件):
 ${plotEventsContext || "本章尚未定义具体情节事件。"}
@@ -198,6 +208,50 @@ export async function optimizePrompt(prompt: string, model: string = "gemini-3-f
   const userPrompt = `请优化以下小说创作提示词，使其包含更多关于语气、风格、感官细节或情节走向的描述。直接返回优化后的提示词，不要有其他解释：\n\n${prompt}`;
   
   return callAI(model, userPrompt, systemInstruction, 0.7);
+}
+
+export async function planNextChapter(project: NovelProject, currentChapterId: string) {
+  const currentChapter = project.chapters.find(c => c.id === currentChapterId);
+  const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n");
+  const characterContext = project.characters.map(c => `${c.name}: ${c.description}`).join("\n");
+
+  const systemInstruction = `
+你是一位专业的小说策划。你的任务是根据当前章节的内容，规划下一章的走向。
+请分析当前剧情，提出下一章的标题、摘要，并识别出剧情中可能出现但尚未建立档案的新角色。
+
+输出格式必须为 JSON:
+{
+  "nextChapterTitle": "章节标题",
+  "nextChapterSummary": "章节摘要",
+  "newCharacters": [
+    { "name": "角色姓名", "description": "角色简要描述" }
+  ]
+}
+`;
+
+  const prompt = `
+小说标题: ${project.title}
+世界观: ${worldContext}
+现有角色: ${characterContext}
+
+当前章节: ${currentChapter?.title}
+当前内容: ${currentChapter?.content}
+
+请规划下一章。
+`;
+
+  const response = await callAI(project.aiConfig.model, prompt, systemInstruction, 0.7);
+  try {
+    // Extract JSON from response (handling potential markdown blocks)
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    throw new Error("无法解析 AI 返回的规划数据");
+  } catch (e) {
+    console.error("AI Planning Error:", e);
+    return null;
+  }
 }
 
 export async function summarizeChapter(content: string, model: string = "gemini-3-flash-preview") {

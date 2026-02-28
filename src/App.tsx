@@ -73,7 +73,8 @@ import {
   generateWorldSetting,
   generateCharacter,
   generateWritingRule,
-  optimizePrompt
+  optimizePrompt,
+  planNextChapter
 } from './services/geminiService';
 
 const STORAGE_KEY = 'musewriter_project';
@@ -160,6 +161,7 @@ export default function App() {
   const [lastSaved, setLastSaved] = useState<string>(new Date().toLocaleTimeString());
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showContextPicker, setShowContextPicker] = useState(false);
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
@@ -316,6 +318,84 @@ export default function App() {
       ...prev,
       writingRules: prev.writingRules.map(r => r.id === id ? { ...r, ...updates } : r)
     }));
+  };
+
+  const handleAiPlanNextChapter = async () => {
+    if (!activeId || activeTab !== ContentType.CHAPTER) return;
+    
+    setIsGenerating(true);
+    try {
+      const plan = await planNextChapter(project, activeId);
+      if (!plan) {
+        showStatus('AI 规划失败，请重试。', 'error');
+        return;
+      }
+
+      const { nextChapterTitle, nextChapterSummary, newCharacters } = plan;
+
+      // 1. Create new characters if any
+      const createdCharIds: string[] = [];
+      if (newCharacters && newCharacters.length > 0) {
+        const newChars: Character[] = newCharacters.map((c: any) => ({
+          id: crypto.randomUUID(),
+          name: c.name,
+          description: c.description,
+          traits: []
+        }));
+        setProject(prev => ({
+          ...prev,
+          characters: [...prev.characters, ...newChars]
+        }));
+        createdCharIds.push(...newChars.map(c => c.id));
+        showStatus(`已自动创建 ${newChars.length} 个新角色！`, 'success');
+      }
+
+      // 2. Create new chapter
+      const newChapter: Chapter = {
+        id: crypto.randomUUID(),
+        title: nextChapterTitle || '新章节',
+        summary: nextChapterSummary || '',
+        content: '',
+        order: project.chapters.length + 1,
+        linkedContextIds: createdCharIds
+      };
+
+      setProject(prev => ({
+        ...prev,
+        chapters: [...prev.chapters, newChapter]
+      }));
+
+      setActiveId(newChapter.id);
+      setActiveTab(ContentType.CHAPTER);
+      showStatus(`已自动创建并跳转至新章节：${newChapter.title}`, 'success');
+
+      // 3. Automatically start generating content for the new chapter
+      const updatedProject = {
+        ...project,
+        chapters: [...project.chapters, newChapter],
+        characters: [...project.characters, ...(newCharacters?.map((c: any) => ({
+          id: crypto.randomUUID(), // This is a bit risky because IDs won't match the ones in setProject above, but for the prompt it's fine
+          name: c.name,
+          description: c.description,
+          traits: []
+        })) || [])]
+      };
+
+      const result = await generateNovelContent(updatedProject, newChapter.id, "请开始创作这一章节。");
+      if (result) {
+        setProject(prev => ({
+          ...prev,
+          chapters: prev.chapters.map(c => c.id === newChapter.id ? { ...c, content: result } : c)
+        }));
+        showStatus('新章节内容生成成功！', 'success');
+      }
+
+    } catch (error) {
+      console.error(error);
+      showStatus('AI 规划过程中发生错误。', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleAiGenerate = async () => {
@@ -497,6 +577,29 @@ export default function App() {
       setActiveTab(ContentType.CHAPTER);
     }
     setShowLibrary(false);
+  };
+
+  const autoLinkContext = () => {
+    if (activeTab !== ContentType.CHAPTER || !activeChapter) return;
+    
+    const content = activeChapter.content + " " + activeChapter.title;
+    const newLinkedIds = new Set<string>(activeChapter.linkedContextIds || []);
+    
+    // Simple keyword matching
+    project.worldSettings.forEach(s => {
+      if (content.includes(s.title)) newLinkedIds.add(s.id);
+    });
+    
+    project.characters.forEach(c => {
+      if (content.includes(c.name)) newLinkedIds.add(c.id);
+    });
+    
+    if (newLinkedIds.size > (activeChapter.linkedContextIds?.length || 0)) {
+      updateChapter(activeChapter.id, { linkedContextIds: Array.from(newLinkedIds) });
+      showStatus('已自动关联发现的设定与角色！', 'success');
+    } else {
+      showStatus('未发现更多可关联的内容。', 'info');
+    }
   };
 
   const sensors = useSensors(
@@ -758,26 +861,26 @@ export default function App() {
   const activeWritingRule = project.writingRules.find(r => r.id === activeId);
 
   return (
-    <div className="flex h-screen bg-white overflow-hidden">
+    <div className="flex h-screen bg-brand-50 overflow-hidden selection:bg-brand-200 selection:text-brand-900">
       {/* Sidebar */}
       <motion.aside 
         initial={false}
         animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        className="border-r border-brand-200 bg-brand-50/50 flex flex-col overflow-hidden"
+        className="border-r border-brand-200 bg-brand-100/30 flex flex-col overflow-hidden backdrop-blur-sm"
       >
-        <div className="p-6 border-b border-brand-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-brand-900 rounded-lg flex items-center justify-center text-white">
-                <Sparkles size={18} />
+        <div className="p-6 border-b border-brand-200/60">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-brand-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-brand-900/20">
+                <Sparkles size={20} />
               </div>
-              <h1 className="text-xl font-bold tracking-tight">灵感作家</h1>
+              <h1 className="text-xl font-serif font-bold tracking-tight text-brand-900">灵感作家</h1>
             </div>
             <button 
               onClick={() => setShowLibrary(!showLibrary)}
               className={cn(
-                "p-1.5 rounded-lg transition-colors",
-                showLibrary ? "bg-brand-900 text-white" : "text-brand-400 hover:bg-brand-100"
+                "p-2 rounded-xl transition-all duration-300",
+                showLibrary ? "bg-brand-900 text-white shadow-md" : "text-brand-400 hover:bg-brand-200/50 hover:text-brand-700"
               )}
               title="我的书架"
             >
@@ -785,35 +888,38 @@ export default function App() {
             </button>
           </div>
 
-          <AnimatePresence>
+          <AnimatePresence mode="wait">
             {showLibrary ? (
               <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden space-y-2 mb-2"
+                key="library"
+                initial={{ height: 0, opacity: 0, y: -10 }}
+                animate={{ height: 'auto', opacity: 1, y: 0 }}
+                exit={{ height: 0, opacity: 0, y: -10 }}
+                className="overflow-hidden space-y-3 mb-2"
               >
-                <div className="flex items-center justify-between px-1 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400">我的书架</span>
-                  <button onClick={createNewProject} className="text-brand-600 hover:text-brand-900">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">我的书架</span>
+                  <button onClick={createNewProject} className="p-1 text-brand-500 hover:text-brand-900 hover:bg-brand-200/50 rounded-lg transition-colors">
                     <Plus size={14} />
                   </button>
                 </div>
-                <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-1">
+                <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
                   {projects.map(p => (
                     <div 
                       key={p.id}
                       onClick={() => switchProject(p.id)}
                       className={cn(
-                        "group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-sm transition-all",
-                        activeProjectId === p.id ? "bg-brand-100 text-brand-900 font-medium" : "text-brand-500 hover:bg-brand-50"
+                        "group flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer text-sm transition-all duration-200",
+                        activeProjectId === p.id 
+                          ? "bg-white text-brand-900 font-semibold shadow-sm border border-brand-200/50" 
+                          : "text-brand-500 hover:bg-white/50 hover:text-brand-700"
                       )}
                     >
                       <span className="truncate">{p.title}</span>
                       {projects.length > 1 && (
                         <button 
                           onClick={(e) => deleteProject(p.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500"
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -821,46 +927,55 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <div className="h-[1px] bg-brand-100 my-2" />
+                <div className="h-[1px] bg-brand-200/50 my-2" />
               </motion.div>
             ) : (
-              <input 
-                type="text" 
-                value={project.title}
-                onChange={(e) => setProject(prev => ({ ...prev, title: e.target.value }))}
-                className="w-full bg-transparent border-none focus:ring-0 font-serif text-lg p-0"
-                placeholder="小说标题..."
-              />
+              <motion.div
+                key="title"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <input 
+                  type="text" 
+                  value={project.title}
+                  onChange={(e) => setProject(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full bg-transparent border-none focus:ring-0 font-serif text-lg p-0 text-brand-900 placeholder:text-brand-300"
+                  placeholder="未命名小说..."
+                />
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-8">
           {/* Outline */}
-          <div>
+          <div className="px-2">
             <div 
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all mb-4",
-                activeTab === ContentType.OUTLINE ? "bg-brand-900 text-white" : "text-brand-500 hover:bg-brand-50 hover:text-brand-700"
+                "flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer transition-all duration-300 group",
+                activeTab === ContentType.OUTLINE 
+                  ? "bg-brand-900 text-white shadow-lg shadow-brand-900/20" 
+                  : "text-brand-500 hover:bg-white hover:text-brand-900 hover:shadow-sm"
               )}
               onClick={() => setActiveTab(ContentType.OUTLINE)}
             >
-              <GitBranch size={16} />
-              <span className="text-sm font-bold uppercase tracking-wider">大纲视图</span>
+              <GitBranch size={18} className={activeTab === ContentType.OUTLINE ? "text-white" : "text-brand-400 group-hover:text-brand-900"} />
+              <span className="text-sm font-bold uppercase tracking-widest">大纲视图</span>
             </div>
           </div>
 
           {/* Chapters */}
-          <div>
-            <div className="flex items-center justify-between mb-2 px-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-brand-400 flex items-center gap-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <FileText size={14} /> 章节目录
               </h3>
-              <button onClick={addChapter} className="p-1 hover:bg-brand-100 rounded text-brand-500">
+              <button onClick={addChapter} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 px-2">
               {project.chapters.sort((a, b) => a.order - b.order).map((c, idx, arr) => 
                 renderSidebarItem(
                   c.id, 
@@ -875,16 +990,16 @@ export default function App() {
           </div>
 
           {/* World Settings */}
-          <div>
-            <div className="flex items-center justify-between mb-2 px-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-brand-400 flex items-center gap-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Layout size={14} /> 世界设定
               </h3>
-              <button onClick={addWorldSetting} className="p-1 hover:bg-brand-100 rounded text-brand-500">
+              <button onClick={addWorldSetting} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 px-2">
               {project.worldSettings.map(s => 
                 renderSidebarItem(s.id, s.title, ContentType.WORLD_SETTING, <Layout size={16} />)
               )}
@@ -892,16 +1007,16 @@ export default function App() {
           </div>
 
           {/* Characters */}
-          <div>
-            <div className="flex items-center justify-between mb-2 px-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-brand-400 flex items-center gap-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Users size={14} /> 人物档案
               </h3>
-              <button onClick={addCharacter} className="p-1 hover:bg-brand-100 rounded text-brand-500">
+              <button onClick={addCharacter} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 px-2">
               {project.characters.map(c => 
                 renderSidebarItem(c.id, c.name, ContentType.CHARACTER, <Users size={16} />)
               )}
@@ -909,16 +1024,16 @@ export default function App() {
           </div>
 
           {/* Rules */}
-          <div>
-            <div className="flex items-center justify-between mb-2 px-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-brand-400 flex items-center gap-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Settings size={14} /> 写作规则
               </h3>
-              <button onClick={addWritingRule} className="p-1 hover:bg-brand-100 rounded text-brand-500">
+              <button onClick={addWritingRule} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 px-2">
               {project.writingRules.map(r => 
                 renderSidebarItem(r.id, r.name, ContentType.WRITING_RULE, <Settings size={16} />)
               )}
@@ -926,18 +1041,18 @@ export default function App() {
           </div>
         </div>
 
-        <div className="p-4 border-t border-brand-200 space-y-2">
-          <div className="bg-white rounded-xl border border-brand-100 p-3 mb-2 space-y-3">
+        <div className="p-4 border-t border-brand-200/60 space-y-4">
+          <div className="bg-white/50 rounded-2xl border border-brand-200/50 p-4 space-y-4 shadow-sm">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400 flex items-center gap-1">
-                  <Zap size={10} /> AI 模型
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+                  <Zap size={12} className="text-brand-900" /> AI 模型
                 </span>
               </div>
               <select 
                 value={project.aiConfig.model}
                 onChange={(e) => setProject(prev => ({ ...prev, aiConfig: { ...prev.aiConfig, model: e.target.value } }))}
-                className="w-full bg-brand-50 border-none rounded-lg text-xs font-medium text-brand-700 py-1.5 px-2 focus:ring-1 focus:ring-brand-200 outline-none"
+                className="w-full bg-white border border-brand-200/50 rounded-xl text-xs font-medium text-brand-700 py-2 px-3 focus:ring-2 focus:ring-brand-900/5 outline-none transition-all appearance-none cursor-pointer"
               >
                 <optgroup label="Google Gemini">
                   <option value="gemini-3-flash-preview">Gemini 3 Flash (快速)</option>
@@ -999,22 +1114,20 @@ export default function App() {
       </motion.aside>
 
       {/* Main Editor Area */}
-      <main className="flex-1 flex flex-col relative">
+      <main className="flex-1 flex flex-col relative bg-brand-50">
         {/* Top Bar */}
-        <header className="h-14 border-b border-brand-200 flex items-center justify-between px-4 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-          <div className="flex items-center gap-4">
+        <header className="h-16 border-b border-brand-200/60 flex items-center justify-between px-8 bg-white/50 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex items-center gap-6">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-brand-50 rounded-lg text-brand-500"
+              className="p-2 text-brand-400 hover:text-brand-900 hover:bg-brand-100 rounded-xl transition-all"
             >
-              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+              <Menu size={20} />
             </button>
-            <div className="h-4 w-[1px] bg-brand-200" />
-            <div className="flex items-center gap-2 text-sm text-brand-500">
-              <Book size={16} />
-              <span>{project.title}</span>
+            <div className="flex items-center gap-2 text-sm font-medium text-brand-400">
+              <span className="hover:text-brand-900 cursor-pointer transition-colors" onClick={() => setActiveTab(ContentType.OUTLINE)}>{project.title}</span>
               <ChevronRight size={14} />
-              <span className="font-medium text-brand-900">
+              <span className="text-brand-900 font-serif italic">
                 {activeTab === ContentType.OUTLINE && "大纲视图"}
                 {activeTab === ContentType.CHAPTER && activeChapter?.title}
                 {activeTab === ContentType.WORLD_SETTING && activeWorldSetting?.title}
@@ -1024,27 +1137,37 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="text-[10px] text-brand-400 font-medium hidden sm:block">已自动保存于 {lastSaved}</span>
+          <div className="flex items-center gap-3">
             <AnimatePresence>
               {statusMessage && (
                 <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium",
-                    statusMessage.type === 'success' ? "bg-emerald-50 text-emerald-700" : 
-                    statusMessage.type === 'error' ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"
+                    "flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-sm",
+                    statusMessage.type === 'success' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
+                    statusMessage.type === 'error' ? "bg-red-50 text-red-600 border border-red-100" :
+                    "bg-brand-50 text-brand-600 border border-brand-100"
                   )}
                 >
-                  {statusMessage.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                  {statusMessage.type === 'success' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
                   {statusMessage.text}
                 </motion.div>
               )}
             </AnimatePresence>
-            <button className="flex items-center gap-2 px-4 py-1.5 bg-brand-900 text-white rounded-lg text-sm font-medium hover:bg-brand-800 transition-colors">
-              <Save size={16} /> 保存
+            <div className="w-[1px] h-4 bg-brand-200 mx-1" />
+            <button 
+              onClick={() => setIsAiAssistantOpen(!isAiAssistantOpen)}
+              className={cn(
+                "flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-sm",
+                isAiAssistantOpen 
+                  ? "bg-brand-900 text-white shadow-brand-900/20" 
+                  : "bg-white border border-brand-200 text-brand-900 hover:bg-brand-50"
+              )}
+            >
+              <Sparkles size={14} />
+              AI 创作助手
             </button>
           </div>
         </header>
@@ -1077,127 +1200,203 @@ export default function App() {
               <div className="space-y-8">
                 {/* Chapter Editor */}
                 {activeTab === ContentType.CHAPTER && activeChapter && (
-                  <>
-                    <div className="flex items-center justify-between">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-10"
+                  >
+                    <div className="flex items-center justify-between group">
                       <input 
                         type="text"
                         value={activeChapter.title}
                         onChange={(e) => updateChapter(activeChapter.id, { title: e.target.value })}
-                        className="w-full text-4xl font-serif font-bold border-none focus:ring-0 p-0 placeholder:text-brand-200"
+                        className="w-full text-5xl font-serif font-bold border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent"
                         placeholder="章节标题..."
                       />
                       <button 
                         onClick={() => deleteItem(ContentType.CHAPTER, activeChapter.id)}
-                        className="p-2 text-brand-300 hover:text-red-500 transition-colors"
+                        className="p-3 text-brand-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"
                         title="删除章节"
                       >
-                        <Trash2 size={20} />
+                        <Trash2 size={22} />
                       </button>
                     </div>
-                    <div className="space-y-4">
+
+                    <div className="bg-white/40 backdrop-blur-sm rounded-3xl border border-brand-200/50 p-6 space-y-4 shadow-sm">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase tracking-wider text-brand-400">章节摘要 (AI 生成)</label>
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+                          <Sparkles size={14} className="text-brand-900" /> 章节摘要 (AI 辅助)
+                        </label>
                         <button 
                           onClick={handleSummarize}
                           disabled={isGenerating || !activeChapter.content}
-                          className="text-xs text-brand-600 hover:text-brand-900 flex items-center gap-1 disabled:opacity-50"
+                          className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 disabled:opacity-50 transition-colors"
                         >
-                          {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                          重新生成摘要
+                          {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                          重新生成
                         </button>
                       </div>
                       <textarea 
                         value={activeChapter.summary}
                         onChange={(e) => updateChapter(activeChapter.id, { summary: e.target.value })}
-                        className="w-full bg-brand-50/50 rounded-xl p-4 text-sm text-brand-600 border-none focus:ring-1 focus:ring-brand-200 resize-none italic"
+                        className="w-full bg-transparent rounded-2xl p-0 text-sm text-brand-600 border-none focus:ring-0 resize-none italic leading-relaxed"
                         rows={3}
                         placeholder="本章的简要概述..."
                       />
                     </div>
-                    <div className="flex items-center justify-between border-b border-brand-100 pb-2 mb-4">
-                      <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-brand-400">
-                        <span className="flex items-center gap-1">
-                          <FileText size={10} /> {getWordCount(activeChapter.content)} 字
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <History size={10} /> 约 {Math.ceil(getWordCount(activeChapter.content) / 300)} 分钟阅读
-                        </span>
-                      </div>
-                      <button 
-                        onClick={() => setIsPreviewMode(!isPreviewMode)}
-                        className={cn(
-                          "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                          isPreviewMode ? "bg-brand-900 text-white" : "bg-brand-100 text-brand-600 hover:bg-brand-200"
-                        )}
-                      >
-                        {isPreviewMode ? "编辑模式" : "预览模式"}
-                      </button>
-                    </div>
-                    <div className="relative min-h-[600px] font-serif text-lg leading-relaxed">
-                      {isPreviewMode ? (
-                        <div className="markdown-body prose prose-slate max-w-none">
-                          <ReactMarkdown>{activeChapter.content}</ReactMarkdown>
+
+                    {/* Linked Context */}
+                    <div className="bg-brand-900/5 rounded-3xl border border-brand-900/10 p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
+                          <Zap size={14} /> 关联上下文 (AI 优先读取)
+                        </label>
+                        <div className="flex items-center gap-4">
+                          <button 
+                            onClick={autoLinkContext}
+                            className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors"
+                            title="根据内容自动关联设定与角色"
+                          >
+                            <Sparkles size={12} /> 自动关联
+                          </button>
+                          <button 
+                            onClick={() => setShowContextPicker(true)}
+                            className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors"
+                          >
+                            <Plus size={12} /> 手动关联
+                          </button>
                         </div>
-                      ) : (
-                        <Editor
-                          value={activeChapter.content}
-                          onValueChange={code => updateChapter(activeChapter.id, { content: code })}
-                          highlight={code => Prism.highlight(code, Prism.languages.markdown, 'markdown')}
-                          padding={0}
-                          className="w-full min-h-[600px] outline-none focus:ring-0"
-                          style={{
-                            fontFamily: 'inherit',
-                            fontSize: 'inherit',
-                            lineHeight: 'inherit',
-                          }}
-                          placeholder="很久很久以前..."
-                        />
-                      )}
+                      </div>
+                      <div className="flex flex-wrap gap-2.5">
+                        {(activeChapter.linkedContextIds || []).length > 0 ? (
+                          activeChapter.linkedContextIds?.map(id => {
+                            const setting = project.worldSettings.find(s => s.id === id);
+                            const char = project.characters.find(c => c.id === id);
+                            if (!setting && !char) return null;
+                            return (
+                              <span key={id} className="px-4 py-1.5 bg-white border border-brand-200 text-brand-900 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm">
+                                {setting ? <Layout size={12} className="text-brand-400" /> : <Users size={12} className="text-brand-400" />}
+                                {setting?.title || char?.name}
+                                <button 
+                                  onClick={() => {
+                                    const newIds = (activeChapter.linkedContextIds || []).filter(cid => cid !== id);
+                                    updateChapter(activeChapter.id, { linkedContextIds: newIds });
+                                  }}
+                                  className="hover:text-red-500 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <div className="text-[10px] text-brand-400 italic">暂无关联上下文。AI 将使用全局设定。</div>
+                        )}
+                      </div>
                     </div>
-                  </>
+
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between border-b border-brand-200/60 pb-4">
+                        <div className="flex items-center gap-6 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                          <span className="flex items-center gap-2">
+                            <FileText size={14} /> {getWordCount(activeChapter.content)} 字
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <Clock size={14} /> 约 {Math.ceil(getWordCount(activeChapter.content) / 300)} 分钟阅读
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-brand-100/50 p-1 rounded-xl">
+                          <button 
+                            onClick={() => setIsPreviewMode(false)}
+                            className={cn(
+                              "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                              !isPreviewMode ? "bg-white text-brand-900 shadow-sm" : "text-brand-400 hover:text-brand-600"
+                            )}
+                          >
+                            编辑
+                          </button>
+                          <button 
+                            onClick={() => setIsAiAssistantOpen(true)}
+                            className={cn(
+                              "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                              isPreviewMode ? "bg-white text-brand-900 shadow-sm" : "text-brand-400 hover:text-brand-600"
+                            )}
+                            onClickCapture={() => setIsPreviewMode(true)}
+                          >
+                            预览
+                          </button>
+                        </div>
+                      </div>
+                      <div className="relative min-h-[600px] font-serif text-xl leading-relaxed text-brand-900">
+                        {isPreviewMode ? (
+                          <div className="markdown-body prose prose-brand max-w-none">
+                            <ReactMarkdown>{activeChapter.content}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <Editor
+                            value={activeChapter.content}
+                            onValueChange={code => updateChapter(activeChapter.id, { content: code })}
+                            highlight={code => Prism.highlight(code, Prism.languages.markdown, 'markdown')}
+                            padding={0}
+                            className="w-full min-h-[600px] outline-none focus:ring-0 bg-transparent"
+                            style={{
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              lineHeight: 'inherit',
+                            }}
+                            placeholder="很久很久以前..."
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
                 )}
 
                 {/* World Setting Editor */}
                 {activeTab === ContentType.WORLD_SETTING && activeWorldSetting && (
-                  <>
-                    <div className="flex items-center justify-between">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-10"
+                  >
+                    <div className="flex items-center justify-between group">
                       <input 
                         type="text"
                         value={activeWorldSetting.title}
                         onChange={(e) => updateWorldSetting(activeWorldSetting.id, { title: e.target.value })}
-                        className="w-full text-4xl font-serif font-bold border-none focus:ring-0 p-0 placeholder:text-brand-200"
+                        className="w-full text-5xl font-serif font-bold border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent"
                         placeholder="设定标题..."
                       />
                       <button 
                         onClick={() => deleteItem(ContentType.WORLD_SETTING, activeWorldSetting.id)}
-                        className="p-2 text-brand-300 hover:text-red-500 transition-colors"
+                        className="p-3 text-brand-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"
                         title="删除设定"
                       >
-                        <Trash2 size={20} />
+                        <Trash2 size={22} />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between border-b border-brand-100 pb-2 mb-4">
-                      <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-brand-400">
-                        <span className="flex items-center gap-1">
-                          <FileText size={10} /> {getWordCount(activeWorldSetting.content)} 字
+                    <div className="flex items-center justify-between border-b border-brand-200/60 pb-4">
+                      <div className="flex items-center gap-6 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                        <span className="flex items-center gap-2">
+                          <FileText size={14} /> {getWordCount(activeWorldSetting.content)} 字
                         </span>
                       </div>
                       <button 
                         onClick={handleGenerateWorldSetting}
                         disabled={isGenerating}
-                        className="flex items-center gap-1 px-3 py-1 bg-brand-900 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-brand-800 transition-all disabled:opacity-50"
+                        className="flex items-center gap-2 px-5 py-2 bg-brand-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-brand-800 transition-all disabled:opacity-50 shadow-sm"
                       >
-                        {isGenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                        {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                         AI 补全设定
                       </button>
                     </div>
                     <textarea 
                       value={activeWorldSetting.content}
                       onChange={(e) => updateWorldSetting(activeWorldSetting.id, { content: e.target.value })}
-                      className="w-full min-h-[400px] text-lg leading-relaxed border-none focus:ring-0 p-0 placeholder:text-brand-200 resize-none"
+                      className="w-full min-h-[500px] text-xl font-serif leading-relaxed border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent resize-none"
                       placeholder="描述你的世界、魔法体系、历史..."
                     />
-                  </>
+                  </motion.div>
                 )}
 
                 {/* Character Editor */}
@@ -1346,69 +1545,191 @@ export default function App() {
         </div>
 
         {/* AI Assistant Panel */}
-        {activeTab === ContentType.CHAPTER && activeId && (
-          <div className="border-t border-brand-200 bg-white p-4">
-            <div className="max-w-3xl mx-auto space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400">AI 创作助手</span>
-                  <div className="group relative">
-                    <AlertCircle size={12} className="text-brand-300 cursor-help" />
-                    <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-brand-900 text-white text-[10px] rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-xl">
-                      <p className="font-bold mb-1">提示词改进建议：</p>
-                      <ul className="list-disc ml-3 space-y-1 opacity-80">
-                        <li><b>具体化：</b>不要只说“继续”，试着说“描述艾拉发现徽章时的惊讶表情”。</li>
-                        <li><b>设定风格：</b>加入“用忧郁的笔触描述”或“增加对话互动”。</li>
-                        <li><b>明确冲突：</b>“突然出现一个黑影袭击了她”比“发生一些意外”更好。</li>
-                      </ul>
+        <AnimatePresence>
+          {isAiAssistantOpen && activeTab === ContentType.CHAPTER && activeId && (
+            <motion.div 
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="border-t border-brand-200/60 bg-white/80 backdrop-blur-xl p-6 sticky bottom-0 z-20"
+            >
+              <div className="max-w-4xl mx-auto space-y-4">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
+                      <Sparkles size={14} /> AI 创作助手
+                    </span>
+                    <div className="group relative">
+                      <AlertCircle size={14} className="text-brand-300 cursor-help" />
+                      <div className="absolute bottom-full left-0 mb-3 w-72 p-4 bg-brand-900 text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-30 shadow-2xl border border-white/10 leading-relaxed">
+                        <p className="font-bold mb-2 flex items-center gap-2 text-brand-200">
+                          <Zap size={12} /> 提示词改进建议
+                        </p>
+                        <ul className="space-y-2 opacity-90">
+                          <li><b className="text-brand-200">具体化：</b>不要只说“继续”，试着说“描述艾拉发现徽章时的惊讶表情”。</li>
+                          <li><b className="text-brand-200">设定风格：</b>加入“用忧郁的笔触描述”或“增加对话互动”。</li>
+                          <li><b className="text-brand-200">明确冲突：</b>“突然出现一个黑影袭击了她”比“发生一些意外”更好。</li>
+                        </ul>
+                      </div>
                     </div>
                   </div>
-                </div>
-                {aiPrompt && (
-                  <button 
-                    onClick={handleOptimizePrompt}
-                    disabled={isGenerating}
-                    className="text-[10px] font-bold uppercase tracking-wider text-brand-600 hover:text-brand-900 flex items-center gap-1 transition-colors disabled:opacity-50"
-                  >
-                    <Zap size={10} /> 魔法优化提示词
-                  </button>
-                )}
-              </div>
-              <div className="flex items-end gap-3">
-                <div className="flex-1 relative">
-                  <textarea 
-                    value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    placeholder="要求 AI 继续、重写或添加特定场景..."
-                    className="w-full bg-brand-50 rounded-2xl px-4 py-3 pr-12 text-sm border-none focus:ring-2 focus:ring-brand-900/10 resize-none min-h-[44px] max-h-32 custom-scrollbar"
-                    rows={1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAiGenerate();
-                      }
-                    }}
-                  />
-                  <div className="absolute right-3 bottom-3 text-[10px] text-brand-300 font-mono">
-                    按 Enter 发送
+                  <div className="flex items-center gap-6">
+                    {aiPrompt && (
+                      <button 
+                        onClick={handleOptimizePrompt}
+                        disabled={isGenerating}
+                        className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                      >
+                        <Zap size={12} /> 魔法优化
+                      </button>
+                    )}
+                    <button 
+                      onClick={handleAiPlanNextChapter}
+                      disabled={isGenerating}
+                      className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                      title="让 AI 根据当前剧情规划下一章并自动创建角色"
+                    >
+                      <GitBranch size={12} /> 规划下一章
+                    </button>
                   </div>
                 </div>
-                <button 
-                  onClick={handleAiGenerate}
-                  disabled={isGenerating}
-                  className={cn(
-                    "h-11 px-6 rounded-2xl bg-brand-900 text-white font-medium flex items-center gap-2 hover:bg-brand-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed",
-                    isGenerating && "animate-pulse"
-                  )}
-                >
-                  {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                  <span>{isGenerating ? '创作中...' : '生成内容'}</span>
+                <div className="flex items-end gap-4">
+                  <div className="flex-1 relative group">
+                    <textarea 
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      placeholder="要求 AI 继续、重写或添加特定场景..."
+                      className="w-full bg-brand-100/50 rounded-2xl px-5 py-4 pr-16 text-sm border-none focus:ring-2 focus:ring-brand-900/10 resize-none min-h-[56px] max-h-40 custom-scrollbar transition-all"
+                      rows={1}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAiGenerate();
+                        }
+                      }}
+                    />
+                    <div className="absolute right-4 bottom-4 text-[9px] font-bold uppercase tracking-widest text-brand-300 pointer-events-none">
+                      Enter 发送
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleAiGenerate}
+                    disabled={isGenerating}
+                    className={cn(
+                      "h-14 px-8 rounded-2xl bg-brand-900 text-white font-bold uppercase tracking-widest text-xs flex items-center gap-3 hover:bg-brand-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-900/20",
+                      isGenerating && "animate-pulse"
+                    )}
+                  >
+                    {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                    <span>{isGenerating ? '创作中' : '生成内容'}</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Context Picker Modal */}
+      <AnimatePresence>
+        {showContextPicker && activeTab === ContentType.CHAPTER && activeChapter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowContextPicker(false)}
+              className="absolute inset-0 bg-brand-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-brand-100 flex items-center justify-between bg-brand-50/50">
+                <div className="flex items-center gap-3">
+                  <Zap size={20} className="text-brand-900" />
+                  <h3 className="text-lg font-serif font-bold text-brand-900">关联上下文</h3>
+                </div>
+                <button onClick={() => setShowContextPicker(false)} className="text-brand-400 hover:text-brand-900">
+                  <X size={20} />
                 </button>
               </div>
-            </div>
+              <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-brand-400 mb-3">世界设定</h4>
+                  <div className="space-y-2">
+                    {project.worldSettings.length > 0 ? project.worldSettings.map(s => {
+                      const isLinked = (activeChapter.linkedContextIds || []).includes(s.id);
+                      return (
+                        <div 
+                          key={s.id}
+                          onClick={() => {
+                            const currentIds = activeChapter.linkedContextIds || [];
+                            const newIds = isLinked ? currentIds.filter(id => id !== s.id) : [...currentIds, s.id];
+                            updateChapter(activeChapter.id, { linkedContextIds: newIds });
+                          }}
+                          className={cn(
+                            "flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border",
+                            isLinked ? "bg-brand-900 border-brand-900 text-white" : "bg-brand-50 border-transparent text-brand-700 hover:bg-brand-100"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Layout size={16} className={isLinked ? "text-white/70" : "text-brand-300"} />
+                            <span className="text-sm font-medium">{s.title}</span>
+                          </div>
+                          {isLinked && <CheckCircle2 size={16} />}
+                        </div>
+                      );
+                    }) : (
+                      <div className="text-xs text-brand-300 italic p-2">暂无世界设定。</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-brand-400 mb-3">人物角色</h4>
+                  <div className="space-y-2">
+                    {project.characters.length > 0 ? project.characters.map(c => {
+                      const isLinked = (activeChapter.linkedContextIds || []).includes(c.id);
+                      return (
+                        <div 
+                          key={c.id}
+                          onClick={() => {
+                            const currentIds = activeChapter.linkedContextIds || [];
+                            const newIds = isLinked ? currentIds.filter(id => id !== c.id) : [...currentIds, c.id];
+                            updateChapter(activeChapter.id, { linkedContextIds: newIds });
+                          }}
+                          className={cn(
+                            "flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border",
+                            isLinked ? "bg-brand-900 border-brand-900 text-white" : "bg-brand-50 border-transparent text-brand-700 hover:bg-brand-100"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Users size={16} className={isLinked ? "text-white/70" : "text-brand-300"} />
+                            <span className="text-sm font-medium">{c.name}</span>
+                          </div>
+                          {isLinked && <CheckCircle2 size={16} />}
+                        </div>
+                      );
+                    }) : (
+                      <div className="text-xs text-brand-300 italic p-2">暂无人物角色。</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 bg-brand-50/50 border-t border-brand-100">
+                <button 
+                  onClick={() => setShowContextPicker(false)}
+                  className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-brand-800 transition-all"
+                >
+                  完成
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
-      </main>
+      </AnimatePresence>
 
       {/* Review Modal */}
       <AnimatePresence>

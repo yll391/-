@@ -48,6 +48,7 @@ export interface Chapter {
   summary: string;
   order: number;
   isExpanded?: boolean;
+  linkedContextIds?: string[];
 }
 
 export interface NovelProject {
