@@ -22,15 +22,11 @@
 
 @layer base {
   body {
-    @apply bg-brand-50 text-brand-900 font-sans antialiased selection:bg-brand-200 selection:text-brand-900;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    background-blend-mode: overlay;
-    background-attachment: fixed;
-    opacity: 0.98;
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
   }
 
   h1, h2, h3, h4 {
-    @apply font-serif tracking-tight;
+    @apply font-sans font-bold tracking-tight;
   }
 }
 
@@ -60,16 +56,15 @@
 }
 
 /* UI Polish */
-.glass-panel {
-  @apply bg-white/70 backdrop-blur-xl border border-brand-200/50 shadow-sm;
+.software-panel {
+  @apply bg-white border border-slate-200 shadow-sm;
 }
 
 .card-hover {
-  @apply transition-all duration-500 hover:shadow-xl hover:shadow-brand-900/5 hover:translate-y-[-4px];
+  @apply transition-all duration-200 hover:border-slate-400;
 }
 
 .neo-blur {
-  backdrop-filter: blur(20px) saturate(180%);
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: white;
 }
 
