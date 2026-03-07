@@ -114,6 +114,14 @@ const INITIAL_PROJECT: NovelProject = {
   }
 };
 
+// --- Utils ---
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+};
+
 export default function App() {
   const [projects, setProjects] = useState<NovelProject[]>(() => {
     const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
@@ -172,12 +180,20 @@ export default function App() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-    setLastSaved(new Date().toLocaleTimeString());
+    try {
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      setLastSaved(new Date().toLocaleTimeString());
+    } catch (e) {
+      console.error('Failed to save projects to localStorage', e);
+    }
   }, [projects]);
 
   useEffect(() => {
-    localStorage.setItem(ACTIVE_PROJECT_ID_KEY, activeProjectId);
+    try {
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, activeProjectId);
+    } catch (e) {
+      console.error('Failed to save active project ID to localStorage', e);
+    }
   }, [activeProjectId]);
 
   const showStatus = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -212,7 +228,7 @@ export default function App() {
 
   const addChapter = () => {
     const newChapter: Chapter = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       title: '新章节',
       content: '',
       summary: '',
@@ -242,7 +258,7 @@ export default function App() {
 
   const addWorldSetting = () => {
     const newSetting: WorldSetting = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       title: '新设定',
       content: ''
     };
@@ -253,7 +269,7 @@ export default function App() {
 
   const addCharacter = () => {
     const newChar: Character = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: '新角色',
       description: '',
       traits: []
@@ -265,7 +281,7 @@ export default function App() {
 
   const addWritingRule = () => {
     const newRule: WritingRule = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: '新规则',
       rule: '',
       isActive: true
@@ -343,7 +359,7 @@ export default function App() {
       const createdCharIds: string[] = [];
       if (newCharacters && newCharacters.length > 0) {
         const newChars: Character[] = newCharacters.map((c: any) => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           name: c.name,
           description: c.description,
           traits: []
@@ -358,7 +374,7 @@ export default function App() {
 
       // 2. Create new chapter
       const newChapter: Chapter = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         title: nextChapterTitle || '新章节',
         summary: nextChapterSummary || '',
         content: '',
@@ -380,7 +396,7 @@ export default function App() {
         ...project,
         chapters: [...project.chapters, newChapter],
         characters: [...project.characters, ...(newCharacters?.map((c: any) => ({
-          id: crypto.randomUUID(), // This is a bit risky because IDs won't match the ones in setProject above, but for the prompt it's fine
+          id: generateId(), // This is a bit risky because IDs won't match the ones in setProject above, but for the prompt it's fine
           name: c.name,
           description: c.description,
           traits: []
@@ -540,9 +556,9 @@ export default function App() {
   const createNewProject = () => {
     const newProject: NovelProject = {
       ...INITIAL_PROJECT,
-      id: crypto.randomUUID(),
+      id: generateId(),
       title: '未命名作品',
-      chapters: [{ ...INITIAL_PROJECT.chapters[0], id: crypto.randomUUID(), title: '第一章', content: '', summary: '' }],
+      chapters: [{ ...INITIAL_PROJECT.chapters[0], id: generateId(), title: '第一章', content: '', summary: '' }],
       worldSettings: [],
       characters: [],
       writingRules: [],
@@ -633,7 +649,7 @@ export default function App() {
 
   const addPlotEvent = (chapterId: string) => {
     const newEvent: PlotEvent = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       title: '新事件',
       description: '',
       chapterId,
@@ -1376,7 +1392,12 @@ export default function App() {
                           <Editor
                             value={activeChapter.content}
                             onValueChange={code => updateChapter(activeChapter.id, { content: code })}
-                            highlight={code => Prism.highlight(code, Prism.languages.markdown, 'markdown')}
+                            highlight={code => {
+                          if (Prism.languages.markdown) {
+                            return Prism.highlight(code, Prism.languages.markdown, 'markdown');
+                          }
+                          return code;
+                        }}
                             padding={0}
                             className="w-full min-h-[600px] outline-none focus:ring-0 bg-transparent"
                             style={{
