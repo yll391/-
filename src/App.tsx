@@ -30,7 +30,11 @@ import {
   GitBranch,
   GripVertical,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Clock,
+  Maximize2,
+  Minimize2,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -150,6 +154,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ContentType>(ContentType.CHAPTER);
   const [activeId, setActiveId] = useState<string>(project.chapters[0]?.id || '');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -649,8 +655,10 @@ export default function App() {
     <div 
       key={id}
       className={cn(
-        "group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-all",
-        activeId === id && activeTab === type ? "bg-brand-100 text-brand-900" : "text-brand-500 hover:bg-brand-50 hover:text-brand-700"
+        "group flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-300",
+        activeId === id && activeTab === type 
+          ? "bg-white text-brand-900 shadow-sm border border-brand-200/50" 
+          : "text-brand-500 hover:bg-white/50 hover:text-brand-700"
       )}
       onClick={() => {
         setActiveId(id);
@@ -658,18 +666,23 @@ export default function App() {
       }}
     >
       <div className="flex items-center gap-3 overflow-hidden">
-        {icon}
-        <span className="truncate text-sm font-medium">{label}</span>
+        <div className={cn(
+          "p-1.5 rounded-lg transition-colors",
+          activeId === id && activeTab === type ? "bg-brand-900 text-white" : "bg-brand-100 text-brand-400 group-hover:text-brand-600"
+        )}>
+          {icon}
+        </div>
+        <span className="truncate text-xs font-medium tracking-tight">{label}</span>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
         {onMoveUp && (
-          <button onClick={(e) => { e.stopPropagation(); onMoveUp(); }} className="p-1 hover:text-brand-900" title="上移">
-            <ArrowUp size={12} />
+          <button onClick={(e) => { e.stopPropagation(); onMoveUp(); }} className="p-1 hover:text-brand-900 hover:bg-brand-100 rounded-md" title="上移">
+            <ArrowUp size={10} />
           </button>
         )}
         {onMoveDown && (
-          <button onClick={(e) => { e.stopPropagation(); onMoveDown(); }} className="p-1 hover:text-brand-900" title="下移">
-            <ArrowDown size={12} />
+          <button onClick={(e) => { e.stopPropagation(); onMoveDown(); }} className="p-1 hover:text-brand-900 hover:bg-brand-100 rounded-md" title="下移">
+            <ArrowDown size={10} />
           </button>
         )}
         <button 
@@ -677,10 +690,10 @@ export default function App() {
             e.stopPropagation();
             deleteItem(type, id);
           }}
-          className="p-1 hover:text-red-500 transition-colors"
+          className="p-1 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
           title="删除"
         >
-          <Trash2 size={14} />
+          <Trash2 size={12} />
         </button>
       </div>
     </div>
@@ -861,12 +874,16 @@ export default function App() {
   const activeWritingRule = project.writingRules.find(r => r.id === activeId);
 
   return (
-    <div className="flex h-screen bg-brand-50 overflow-hidden selection:bg-brand-200 selection:text-brand-900">
+    <div className="flex h-screen bg-brand-50 overflow-hidden selection:bg-brand-200 selection:text-brand-900 relative">
       {/* Sidebar */}
       <motion.aside 
         initial={false}
-        animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        className="border-r border-brand-200 bg-brand-100/30 flex flex-col overflow-hidden backdrop-blur-sm"
+        animate={{ 
+          width: isSidebarOpen && !isFocusMode ? 280 : 0, 
+          opacity: isSidebarOpen && !isFocusMode ? 1 : 0,
+          x: isSidebarOpen && !isFocusMode ? 0 : -20
+        }}
+        className="border-r border-brand-200 bg-brand-100/30 flex flex-col overflow-hidden backdrop-blur-sm z-30"
       >
         <div className="p-6 border-b border-brand-200/60">
           <div className="flex items-center justify-between mb-6">
@@ -1041,41 +1058,44 @@ export default function App() {
           </div>
         </div>
 
-        <div className="p-4 border-t border-brand-200/60 space-y-4">
-          <div className="bg-white/50 rounded-2xl border border-brand-200/50 p-4 space-y-4 shadow-sm">
+        <div className="p-4 border-t border-brand-200/60 space-y-4 bg-brand-100/20">
+          <div className="bg-white/60 backdrop-blur-sm rounded-2xl border border-brand-200/50 p-4 space-y-4 shadow-sm">
             <div>
               <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
-                  <Zap size={12} className="text-brand-900" /> AI 模型
+                <span className="text-[9px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+                  <Zap size={12} className="text-brand-900" /> AI 核心引擎
                 </span>
               </div>
-              <select 
-                value={project.aiConfig.model}
-                onChange={(e) => setProject(prev => ({ ...prev, aiConfig: { ...prev.aiConfig, model: e.target.value } }))}
-                className="w-full bg-white border border-brand-200/50 rounded-xl text-xs font-medium text-brand-700 py-2 px-3 focus:ring-2 focus:ring-brand-900/5 outline-none transition-all appearance-none cursor-pointer"
-              >
-                <optgroup label="Google Gemini">
-                  <option value="gemini-3-flash-preview">Gemini 3 Flash (快速)</option>
-                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (强大)</option>
-                </optgroup>
-                <optgroup label="Alibaba Qwen">
-                  <option value="qwen-max">通义千问 Max (顶尖)</option>
-                  <option value="qwen-plus">通义千问 Plus (均衡)</option>
-                  <option value="qwen-turbo">通义千问 Turbo (极速)</option>
-                </optgroup>
-                <optgroup label="DeepSeek">
-                  <option value="deepseek-chat">DeepSeek Chat (通用)</option>
-                  <option value="deepseek-reasoner">DeepSeek Reasoner (深度思考)</option>
-                </optgroup>
-              </select>
+              <div className="relative group/select">
+                <select 
+                  value={project.aiConfig.model}
+                  onChange={(e) => setProject(prev => ({ ...prev, aiConfig: { ...prev.aiConfig, model: e.target.value } }))}
+                  className="w-full bg-white/80 border border-brand-200/50 rounded-xl text-[11px] font-bold text-brand-700 py-2.5 px-3 focus:ring-2 focus:ring-brand-900/5 outline-none transition-all appearance-none cursor-pointer pr-8"
+                >
+                  <optgroup label="Google Gemini">
+                    <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                    <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                  </optgroup>
+                  <optgroup label="Alibaba Qwen">
+                    <option value="qwen-max">Qwen Max</option>
+                    <option value="qwen-plus">Qwen Plus</option>
+                    <option value="qwen-turbo">Qwen Turbo</option>
+                  </optgroup>
+                  <optgroup label="DeepSeek">
+                    <option value="deepseek-chat">DeepSeek Chat</option>
+                    <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                  </optgroup>
+                </select>
+                <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-400 pointer-events-none group-hover/select:text-brand-900 transition-colors" />
+              </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400 flex items-center gap-1">
-                  <Sliders size={10} /> AI 创造力 (Temperature)
+                <span className="text-[9px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-1">
+                  <Sliders size={10} /> 创造力指数
                 </span>
-                <span className="text-xs font-mono text-brand-600">{project.aiConfig.temperature.toFixed(1)}</span>
+                <span className="text-[10px] font-mono font-bold text-brand-900">{project.aiConfig.temperature.toFixed(1)}</span>
               </div>
               <input 
                 type="range" 
@@ -1084,27 +1104,15 @@ export default function App() {
                 step="0.1" 
                 value={project.aiConfig.temperature}
                 onChange={(e) => setProject(prev => ({ ...prev, aiConfig: { ...prev.aiConfig, temperature: parseFloat(e.target.value) } }))}
-                className="w-full h-1.5 bg-brand-100 rounded-lg appearance-none cursor-pointer accent-brand-900"
+                className="w-full h-1 bg-brand-200 rounded-lg appearance-none cursor-pointer accent-brand-900"
               />
-              <div className="flex justify-between mt-1">
-                <span className="text-[8px] text-brand-300">严谨</span>
-                <span className="text-[8px] text-brand-300">奔放</span>
-              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button 
-              onClick={handleConsistencyCheck}
-              disabled={isGenerating}
-              className="flex items-center justify-center gap-2 py-2 bg-brand-100 text-brand-700 rounded-lg text-xs font-medium hover:bg-brand-200 transition-colors disabled:opacity-50"
-            >
-              {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-              连贯性检查
-            </button>
+          <div className="flex flex-col gap-2">
             <button 
               onClick={() => setShowInspirationModal(true)}
-              className="flex items-center justify-center gap-2 py-2 bg-brand-900 text-white rounded-lg text-xs font-medium hover:bg-brand-800 transition-colors"
+              className="flex items-center justify-center gap-2 py-2.5 bg-brand-900 text-white rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-brand-800 transition-all shadow-lg shadow-brand-900/10 active:scale-[0.98]"
             >
               <Zap size={12} />
               灵感迸发
@@ -1114,63 +1122,94 @@ export default function App() {
       </motion.aside>
 
       {/* Main Editor Area */}
-      <main className="flex-1 flex flex-col relative bg-brand-50">
+      <main className="flex-1 flex flex-col relative bg-brand-50 overflow-hidden">
         {/* Top Bar */}
-        <header className="h-16 border-b border-brand-200/60 flex items-center justify-between px-8 bg-white/50 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-6">
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 text-brand-400 hover:text-brand-900 hover:bg-brand-100 rounded-xl transition-all"
+        <AnimatePresence>
+          {!isFocusMode && (
+            <motion.header 
+              initial={{ y: -64 }}
+              animate={{ y: 0 }}
+              exit={{ y: -64 }}
+              className="h-16 border-b border-brand-200/60 flex items-center justify-between px-8 bg-white/50 backdrop-blur-md sticky top-0 z-20"
             >
-              <Menu size={20} />
-            </button>
-            <div className="flex items-center gap-2 text-sm font-medium text-brand-400">
-              <span className="hover:text-brand-900 cursor-pointer transition-colors" onClick={() => setActiveTab(ContentType.OUTLINE)}>{project.title}</span>
-              <ChevronRight size={14} />
-              <span className="text-brand-900 font-serif italic">
-                {activeTab === ContentType.OUTLINE && "大纲视图"}
-                {activeTab === ContentType.CHAPTER && activeChapter?.title}
-                {activeTab === ContentType.WORLD_SETTING && activeWorldSetting?.title}
-                {activeTab === ContentType.CHARACTER && activeCharacter?.name}
-                {activeTab === ContentType.WRITING_RULE && activeWritingRule?.name}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <AnimatePresence>
-              {statusMessage && (
-                <motion.div 
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-sm",
-                    statusMessage.type === 'success' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
-                    statusMessage.type === 'error' ? "bg-red-50 text-red-600 border border-red-100" :
-                    "bg-brand-50 text-brand-600 border border-brand-100"
-                  )}
+              <div className="flex items-center gap-6">
+                <button 
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  className="p-2 text-brand-400 hover:text-brand-900 hover:bg-brand-100 rounded-xl transition-all"
                 >
-                  {statusMessage.type === 'success' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-                  {statusMessage.text}
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <div className="w-[1px] h-4 bg-brand-200 mx-1" />
-            <button 
-              onClick={() => setIsAiAssistantOpen(!isAiAssistantOpen)}
-              className={cn(
-                "flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-sm",
-                isAiAssistantOpen 
-                  ? "bg-brand-900 text-white shadow-brand-900/20" 
-                  : "bg-white border border-brand-200 text-brand-900 hover:bg-brand-50"
-              )}
-            >
-              <Sparkles size={14} />
-              AI 创作助手
-            </button>
-          </div>
-        </header>
+                  <Menu size={20} />
+                </button>
+                <div className="flex items-center gap-2 text-sm font-medium text-brand-400">
+                  <span className="hover:text-brand-900 cursor-pointer transition-colors" onClick={() => setActiveTab(ContentType.OUTLINE)}>{project.title}</span>
+                  <ChevronRight size={14} />
+                  <span className="text-brand-900 font-serif italic">
+                    {activeTab === ContentType.OUTLINE && "大纲视图"}
+                    {activeTab === ContentType.CHAPTER && activeChapter?.title}
+                    {activeTab === ContentType.WORLD_SETTING && activeWorldSetting?.title}
+                    {activeTab === ContentType.CHARACTER && activeCharacter?.name}
+                    {activeTab === ContentType.WRITING_RULE && activeWritingRule?.name}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <AnimatePresence>
+                  {statusMessage && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-sm",
+                        statusMessage.type === 'success' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
+                        statusMessage.type === 'error' ? "bg-red-50 text-red-600 border border-red-100" :
+                        "bg-brand-50 text-brand-600 border border-brand-100"
+                      )}
+                    >
+                      {statusMessage.type === 'success' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                      {statusMessage.text}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                <div className="flex items-center gap-1 bg-brand-100/50 p-1 rounded-xl border border-brand-200/50">
+                  <button 
+                    onClick={() => setIsFocusMode(true)}
+                    className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                    title="专注模式"
+                  >
+                    <Maximize2 size={16} />
+                  </button>
+                  <button 
+                    onClick={() => setIsAiAssistantOpen(!isAiAssistantOpen)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                      isAiAssistantOpen 
+                        ? "bg-brand-900 text-white shadow-md shadow-brand-900/20" 
+                        : "text-brand-500 hover:text-brand-900 hover:bg-white hover:shadow-sm"
+                    )}
+                  >
+                    <Sparkles size={14} />
+                    助手
+                  </button>
+                </div>
+              </div>
+            </motion.header>
+          )}
+        </AnimatePresence>
+
+        {/* Focus Mode Toggle (Floating) */}
+        {isFocusMode && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={() => setIsFocusMode(false)}
+            className="fixed top-6 right-6 z-50 p-3 bg-brand-900/10 hover:bg-brand-900 text-brand-400 hover:text-white rounded-full backdrop-blur-md transition-all group border border-brand-900/10"
+            title="退出专注模式"
+          >
+            <Minimize2 size={20} className="group-hover:scale-110 transition-transform" />
+          </motion.button>
+        )}
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -1222,24 +1261,25 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="bg-white/40 backdrop-blur-sm rounded-3xl border border-brand-200/50 p-6 space-y-4 shadow-sm">
+                    <div className="bg-white/40 backdrop-blur-sm rounded-3xl border border-brand-200/50 p-8 space-y-6 shadow-sm relative overflow-hidden group/summary">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-brand-900/10 group-hover/summary:bg-brand-900/30 transition-colors" />
                       <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
-                          <Sparkles size={14} className="text-brand-900" /> 章节摘要 (AI 辅助)
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
+                          <Sparkles size={14} /> 章节摘要
                         </label>
                         <button 
                           onClick={handleSummarize}
                           disabled={isGenerating || !activeChapter.content}
-                          className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 disabled:opacity-50 transition-colors"
+                          className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
                         >
                           {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                          重新生成
+                          AI 重新生成
                         </button>
                       </div>
                       <textarea 
                         value={activeChapter.summary}
                         onChange={(e) => updateChapter(activeChapter.id, { summary: e.target.value })}
-                        className="w-full bg-transparent rounded-2xl p-0 text-sm text-brand-600 border-none focus:ring-0 resize-none italic leading-relaxed"
+                        className="w-full bg-transparent rounded-2xl p-0 text-base text-brand-600 border-none focus:ring-0 resize-none italic leading-relaxed font-editorial"
                         rows={3}
                         placeholder="本章的简要概述..."
                       />
@@ -1551,78 +1591,100 @@ export default function App() {
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="border-t border-brand-200/60 bg-white/80 backdrop-blur-xl p-6 sticky bottom-0 z-20"
+              className="fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-4xl z-40 px-6"
             >
-              <div className="max-w-4xl mx-auto space-y-4">
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
-                      <Sparkles size={14} /> AI 创作助手
-                    </span>
-                    <div className="group relative">
-                      <AlertCircle size={14} className="text-brand-300 cursor-help" />
-                      <div className="absolute bottom-full left-0 mb-3 w-72 p-4 bg-brand-900 text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-30 shadow-2xl border border-white/10 leading-relaxed">
-                        <p className="font-bold mb-2 flex items-center gap-2 text-brand-200">
-                          <Zap size={12} /> 提示词改进建议
-                        </p>
-                        <ul className="space-y-2 opacity-90">
-                          <li><b className="text-brand-200">具体化：</b>不要只说“继续”，试着说“描述艾拉发现徽章时的惊讶表情”。</li>
-                          <li><b className="text-brand-200">设定风格：</b>加入“用忧郁的笔触描述”或“增加对话互动”。</li>
-                          <li><b className="text-brand-200">明确冲突：</b>“突然出现一个黑影袭击了她”比“发生一些意外”更好。</li>
-                        </ul>
+              <div className="bg-white/80 backdrop-blur-2xl rounded-[32px] border border-brand-200/50 p-6 shadow-2xl shadow-brand-900/10">
+                <div className="max-w-4xl mx-auto space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
+                        <Sparkles size={14} /> AI 创作助手
+                      </span>
+                      <div className="group relative">
+                        <AlertCircle size={14} className="text-brand-300 cursor-help" />
+                        <div className="absolute bottom-full left-0 mb-3 w-72 p-4 bg-brand-900 text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-30 shadow-2xl border border-white/10 leading-relaxed">
+                          <p className="font-bold mb-2 flex items-center gap-2 text-brand-200">
+                            <Zap size={12} /> 提示词改进建议
+                          </p>
+                          <ul className="space-y-2 opacity-90">
+                            <li><b className="text-brand-200">具体化：</b>不要只说“继续”，试着说“描述艾拉发现徽章时的惊讶表情”。</li>
+                            <li><b className="text-brand-200">设定风格：</b>加入“用忧郁的笔触描述”或“增加对话互动”。</li>
+                            <li><b className="text-brand-200">明确冲突：</b>“突然出现一个黑影袭击了她”比“发生一些意外”更好。</li>
+                          </ul>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    {aiPrompt && (
+                    <div className="flex items-center gap-6">
                       <button 
-                        onClick={handleOptimizePrompt}
-                        disabled={isGenerating}
-                        className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                        onClick={() => setIsAiAssistantOpen(false)}
+                        className="text-brand-400 hover:text-brand-900 transition-colors"
                       >
-                        <Zap size={12} /> 魔法优化
+                        <X size={18} />
                       </button>
-                    )}
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-4">
+                    <div className="flex-1 relative group">
+                      <textarea 
+                        value={aiPrompt}
+                        onChange={(e) => setAiPrompt(e.target.value)}
+                        placeholder="要求 AI 继续、重写或添加特定场景..."
+                        className="w-full bg-brand-100/50 rounded-2xl px-5 py-4 pr-16 text-sm border-none focus:ring-2 focus:ring-brand-900/10 resize-none min-h-[56px] max-h-40 custom-scrollbar transition-all"
+                        rows={1}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleAiGenerate();
+                          }
+                        }}
+                      />
+                      <div className="absolute right-4 bottom-4 flex items-center gap-3">
+                        {aiPrompt && (
+                          <button 
+                            onClick={handleOptimizePrompt}
+                            disabled={isGenerating}
+                            className="p-1.5 text-brand-400 hover:text-brand-900 transition-colors"
+                            title="魔法优化"
+                          >
+                            <Zap size={14} />
+                          </button>
+                        )}
+                        <div className="text-[9px] font-bold uppercase tracking-widest text-brand-300 pointer-events-none">
+                          Enter 发送
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <button 
+                        onClick={handleAiGenerate}
+                        disabled={isGenerating}
+                        className={cn(
+                          "h-14 px-8 rounded-2xl bg-brand-900 text-white font-bold uppercase tracking-widest text-xs flex items-center gap-3 hover:bg-brand-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-900/20",
+                          isGenerating && "animate-pulse"
+                        )}
+                      >
+                        {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                        <span>{isGenerating ? '创作中' : '生成内容'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 px-1">
                     <button 
                       onClick={handleAiPlanNextChapter}
                       disabled={isGenerating}
-                      className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
-                      title="让 AI 根据当前剧情规划下一章并自动创建角色"
+                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
                     >
                       <GitBranch size={12} /> 规划下一章
                     </button>
+                    <div className="w-1 h-1 rounded-full bg-brand-200" />
+                    <button 
+                      onClick={handleConsistencyCheck}
+                      disabled={isGenerating}
+                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                      <Search size={12} /> 连贯性检查
+                    </button>
                   </div>
-                </div>
-                <div className="flex items-end gap-4">
-                  <div className="flex-1 relative group">
-                    <textarea 
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      placeholder="要求 AI 继续、重写或添加特定场景..."
-                      className="w-full bg-brand-100/50 rounded-2xl px-5 py-4 pr-16 text-sm border-none focus:ring-2 focus:ring-brand-900/10 resize-none min-h-[56px] max-h-40 custom-scrollbar transition-all"
-                      rows={1}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleAiGenerate();
-                        }
-                      }}
-                    />
-                    <div className="absolute right-4 bottom-4 text-[9px] font-bold uppercase tracking-widest text-brand-300 pointer-events-none">
-                      Enter 发送
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleAiGenerate}
-                    disabled={isGenerating}
-                    className={cn(
-                      "h-14 px-8 rounded-2xl bg-brand-900 text-white font-bold uppercase tracking-widest text-xs flex items-center gap-3 hover:bg-brand-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-900/20",
-                      isGenerating && "animate-pulse"
-                    )}
-                  >
-                    {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                    <span>{isGenerating ? '创作中' : '生成内容'}</span>
-                  </button>
                 </div>
               </div>
             </motion.div>

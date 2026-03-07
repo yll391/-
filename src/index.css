@@ -23,10 +23,14 @@
 @layer base {
   body {
     @apply bg-brand-50 text-brand-900 font-sans antialiased selection:bg-brand-200 selection:text-brand-900;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    background-blend-mode: overlay;
+    background-attachment: fixed;
+    opacity: 0.98;
   }
 
   h1, h2, h3, h4 {
-    @apply font-serif;
+    @apply font-serif tracking-tight;
   }
 }
 
@@ -40,11 +44,11 @@
 .token.url { color: #453e35; text-decoration: underline; }
 
 .markdown-body {
-  @apply prose prose-stone max-w-none prose-headings:font-serif prose-p:font-serif prose-p:text-lg prose-p:leading-relaxed;
+  @apply prose prose-stone max-w-none prose-headings:font-serif prose-p:font-serif prose-p:text-lg prose-p:leading-relaxed prose-strong:text-brand-900 prose-blockquote:border-brand-200 prose-blockquote:bg-brand-100/30 prose-blockquote:rounded-r-xl prose-blockquote:py-1;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -52,15 +56,20 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-brand-200 rounded-full hover:bg-brand-300 transition-colors;
+  @apply bg-brand-200/50 rounded-full hover:bg-brand-300/80 transition-colors;
 }
 
 /* UI Polish */
 .glass-panel {
-  @apply bg-white/80 backdrop-blur-md border border-brand-100 shadow-sm;
+  @apply bg-white/70 backdrop-blur-xl border border-brand-200/50 shadow-sm;
 }
 
 .card-hover {
-  @apply transition-all duration-300 hover:shadow-md hover:translate-y-[-2px];
+  @apply transition-all duration-500 hover:shadow-xl hover:shadow-brand-900/5 hover:translate-y-[-4px];
+}
+
+.neo-blur {
+  backdrop-filter: blur(20px) saturate(180%);
+  background-color: rgba(255, 255, 255, 0.7);
 }
 
