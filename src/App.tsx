@@ -124,27 +124,31 @@ const generateId = () => {
 
 export default function App() {
   const [projects, setProjects] = useState<NovelProject[]>(() => {
-    const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (saved) {
-      try {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem(PROJECTS_STORAGE_KEY) : null;
+      if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch (e) {}
-    }
-    // Migration
-    const oldSaved = localStorage.getItem(STORAGE_KEY);
-    if (oldSaved) {
-      try {
+      }
+      // Migration
+      const oldSaved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+      if (oldSaved) {
         const oldProject = JSON.parse(oldSaved);
         return [oldProject];
-      } catch (e) {}
+      }
+    } catch (e) {
+      console.error('LocalStorage access failed during init', e);
     }
     return [INITIAL_PROJECT];
   });
 
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
-    const savedId = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
-    if (savedId && projects.some(p => p.id === savedId)) return savedId;
+    try {
+      const savedId = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
+      if (savedId && projects.some(p => p.id === savedId)) return savedId;
+    } catch (e) {
+      console.error('LocalStorage access failed during active ID init', e);
+    }
     return projects[0]?.id || INITIAL_PROJECT.id;
   });
 
@@ -889,6 +893,18 @@ export default function App() {
   const activeCharacter = project.characters.find(c => c.id === activeId);
   const activeWritingRule = project.writingRules.find(r => r.id === activeId);
 
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-brand-50 text-brand-900 p-10 text-center">
+        <div>
+          <h1 className="text-2xl font-serif mb-4">应用启动遇到一点小问题</h1>
+          <p className="text-brand-500">别担心，这通常是浏览器缓存或存储限制引起的。请尝试刷新页面。</p>
+          <button onClick={() => window.location.reload()} className="mt-6 px-6 py-2 bg-brand-900 text-white rounded-xl">刷新页面</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-brand-50 overflow-hidden selection:bg-brand-200 selection:text-brand-900 relative">
       {/* Sidebar */}
@@ -1393,11 +1409,15 @@ export default function App() {
                             value={activeChapter.content}
                             onValueChange={code => updateChapter(activeChapter.id, { content: code })}
                             highlight={code => {
-                          if (Prism.languages.markdown) {
-                            return Prism.highlight(code, Prism.languages.markdown, 'markdown');
-                          }
-                          return code;
-                        }}
+                              try {
+                                if (Prism && Prism.languages && Prism.languages.markdown) {
+                                  return Prism.highlight(code, Prism.languages.markdown, 'markdown');
+                                }
+                              } catch (e) {
+                                console.error('Prism highlight error', e);
+                              }
+                              return code;
+                            }}
                             padding={0}
                             className="w-full min-h-[600px] outline-none focus:ring-0 bg-transparent"
                             style={{
