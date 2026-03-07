@@ -1,45 +1,67 @@
-export interface CharacterStatus {
-  hp: number;
-  maxHp: number;
-  stamina: number;
-  maxStamina: number;
-  wounds: string[];
+export enum ContentType {
+  WORLD_SETTING = 'WORLD_SETTING',
+  CHARACTER = 'CHARACTER',
+  WRITING_RULE = 'WRITING_RULE',
+  CHAPTER = 'CHAPTER',
+  OUTLINE = 'OUTLINE',
+}
+
+export interface PlotLine {
+  id: string;
+  title: string;
+  color: string;
+}
+
+export interface PlotEvent {
+  id: string;
+  title: string;
+  description: string;
+  chapterId?: string;
+  plotLineId?: string;
+  order: number;
+}
+
+export interface WorldSetting {
+  id: string;
+  title: string;
+  content: string;
 }
 
 export interface Character {
   id: string;
   name: string;
   description: string;
-  status: CharacterStatus;
   traits: string[];
-  voiceFingerprint: string; // Description of their tone/style
 }
 
-export interface Relationship {
-  sourceId: string;
-  targetId: string;
-  affection: number; // 0-100
-  hostility: number; // 0-100
-  type: string;
-}
-
-export interface LoreEntry {
+export interface WritingRule {
   id: string;
-  category: 'world' | 'item' | 'event' | 'other';
-  title: string;
-  content: string;
+  name: string;
+  rule: string;
+  isActive: boolean;
 }
 
-export interface Resources {
-  money: number;
-  supplies: number;
-}
-
-export interface StoryState {
+export interface Chapter {
+  id: string;
   title: string;
   content: string;
+  summary: string;
+  order: number;
+  isExpanded?: boolean;
+  linkedContextIds?: string[];
+}
+
+export interface NovelProject {
+  id: string;
+  title: string;
+  worldSettings: WorldSetting[];
   characters: Character[];
-  relationships: Relationship[];
-  lore: LoreEntry[];
-  resources: Resources;
+  writingRules: WritingRule[];
+  chapters: Chapter[];
+  plotLines: PlotLine[];
+  plotEvents: PlotEvent[];
+  aiConfig: {
+    temperature: number;
+    model: string;
+  };
 }
