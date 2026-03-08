@@ -1207,8 +1207,10 @@ function AppContent() {
                   className="w-full bg-white/80 border border-brand-200/50 rounded-xl text-[11px] font-bold text-brand-700 py-2.5 px-3 focus:ring-2 focus:ring-brand-900/5 outline-none transition-all appearance-none cursor-pointer pr-8"
                 >
                   <optgroup label="Google Gemini">
-                    <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-                    <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                    <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite (免费/极速)</option>
+                    <option value="gemini-3-flash-preview">Gemini 3 Flash (免费/均衡)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (免费/稳定)</option>
+                    <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (强大/推理)</option>
                   </optgroup>
                   <optgroup label="Alibaba Qwen">
                     <option value="qwen-max">Qwen Max</option>
