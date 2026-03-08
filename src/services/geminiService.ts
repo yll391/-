@@ -7,11 +7,22 @@ function getAI() {
   if (!aiInstance) {
     let apiKey = "";
     
-    // 兼容 Vite 本地环境 (import.meta.env) 和 Node/AI Studio 环境 (process.env)
-    if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
-      apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    } else if (typeof process !== "undefined" && process.env && process.env.GEMINI_API_KEY) {
-      apiKey = process.env.GEMINI_API_KEY;
+    // 兼容 Vite 本地环境 (import.meta.env)
+    try {
+      if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
+        apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    // 兼容 Node 环境 (process.env)
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.GEMINI_API_KEY) {
+        apiKey = process.env.GEMINI_API_KEY;
+      }
+    } catch (e) {
+      // Ignore
     }
 
     if (!apiKey) {

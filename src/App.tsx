@@ -61,11 +61,6 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
 import { 
   NovelProject, 
   WorldSetting, 
@@ -88,6 +83,10 @@ import {
   optimizePrompt,
   planNextChapter
 } from './services/geminiService';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 const STORAGE_KEY = 'musewriter_project';
 const PROJECTS_STORAGE_KEY = 'musewriter_projects_v2';
