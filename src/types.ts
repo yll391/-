@@ -1,67 +1,21 @@
-export enum ContentType {
-  WORLD_SETTING = 'WORLD_SETTING',
-  CHARACTER = 'CHARACTER',
-  WRITING_RULE = 'WRITING_RULE',
-  CHAPTER = 'CHAPTER',
-  OUTLINE = 'OUTLINE',
-}
+import React from 'react';
 
-export interface PlotLine {
-  id: string;
-  title: string;
-  color: string;
-}
-
-export interface PlotEvent {
-  id: string;
-  title: string;
-  description: string;
-  chapterId?: string;
-  plotLineId?: string;
-  order: number;
-}
-
-export interface WorldSetting {
-  id: string;
-  title: string;
-  content: string;
-}
-
-export interface Character {
+export interface AppConfig {
   id: string;
   name: string;
-  description: string;
-  traits: string[];
+  icon: React.ReactNode;
+  component: React.ComponentType<any>;
+  isPinned?: boolean;
 }
 
-export interface WritingRule {
+export interface WindowState {
   id: string;
-  name: string;
-  rule: string;
-  isActive: boolean;
-}
-
-export interface Chapter {
-  id: string;
+  appId: string;
   title: string;
-  content: string;
-  summary: string;
-  order: number;
-  isExpanded?: boolean;
-  linkedContextIds?: string[];
-}
-
-export interface NovelProject {
-  id: string;
-  title: string;
-  worldSettings: WorldSetting[];
-  characters: Character[];
-  writingRules: WritingRule[];
-  chapters: Chapter[];
-  plotLines: PlotLine[];
-  plotEvents: PlotEvent[];
-  aiConfig: {
-    temperature: number;
-    model: string;
-  };
+  isOpen: boolean;
+  isMinimized: boolean;
+  isMaximized: boolean;
+  zIndex: number;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
 }

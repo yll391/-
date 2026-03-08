@@ -1,5 +1,5 @@
 {
-  "name": "灵感作家 AI (MuseWriter)",
-  "description": "一款由 AI 驱动的小说写作助手，支持世界观设定、人物档案管理及章节内容智能生成，具备上下文感知能力。",
+  "name": "Win11 Web Desktop",
+  "description": "一个高仿 Windows 11 的 Web 桌面环境，支持窗口管理、多任务处理及本地部署指南。内置 AI 助手与实用工具。",
   "requestFramePermissions": []
 }

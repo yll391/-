@@ -1,19 +1,41 @@
 import { GoogleGenAI } from "@google/genai";
 import { NovelProject, Chapter } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let aiInstance: any = null;
+
+function getAI() {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("GEMINI_API_KEY is not defined in the environment.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey: apiKey || "" });
+  }
+  return aiInstance;
+}
 
 async function callAI(model: string, prompt: string, systemInstruction: string, temperature: number = 0.7) {
+  const ai = getAI();
   if (model.includes("gemini")) {
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        systemInstruction,
-        temperature,
-      },
-    });
-    return response.text;
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction,
+          temperature,
+        },
+      });
+      
+      if (!response || !response.text) {
+        throw new Error("AI 返回了空响应。");
+      }
+      
+      return response.text;
+    } catch (error: any) {
+      console.error("Gemini API Error:", error);
+      throw new Error(error.message || "Gemini API 调用失败");
+    }
   } else {
     const response = await fetch("/api/ai/generate", {
       method: "POST",
@@ -174,7 +196,12 @@ ${project.worldSettings.map(s => `- ${s.title}: ${s.content}`).join("\n")}
 
 请根据现有世界观，为这个特定设定提供详细、生动且具有逻辑自洽性的补充内容。
 `;
-  return callAI(project.aiConfig.model, prompt, systemInstruction, 0.8);
+  return callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.8
+  );
 }
 
 export async function generateCharacter(project: NovelProject, name: string, currentDescription: string) {
@@ -188,7 +215,12 @@ ${project.worldSettings.map(s => `- ${s.title}: ${s.content}`).join("\n")}
 
 请根据世界观设定，为这个角色提供深刻的背景故事、性格动机、外貌特征或潜在冲突。
 `;
-  return callAI(project.aiConfig.model, prompt, systemInstruction, 0.8);
+  return callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.8
+  );
 }
 
 export async function generateWritingRule(project: NovelProject, name: string, currentRule: string) {
@@ -200,7 +232,12 @@ export async function generateWritingRule(project: NovelProject, name: string, c
 
 请为这条写作规则提供具体、可操作的建议，帮助作者提升文笔或保持风格一致性。
 `;
-  return callAI(project.aiConfig.model, prompt, systemInstruction, 0.7);
+  return callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.7
+  );
 }
 
 export async function optimizePrompt(prompt: string, model: string = "gemini-3-flash-preview") {
@@ -240,7 +277,12 @@ export async function planNextChapter(project: NovelProject, currentChapterId: s
 请规划下一章。
 `;
 
-  const response = await callAI(project.aiConfig.model, prompt, systemInstruction, 0.7);
+  const response = await callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.7
+  );
   try {
     // Extract JSON from response (handling potential markdown blocks)
     const jsonMatch = response.match(/\{[\s\S]*\}/);

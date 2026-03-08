@@ -158,13 +158,23 @@ function AppContent() {
       const saved = typeof window !== 'undefined' ? localStorage.getItem(PROJECTS_STORAGE_KEY) : null;
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((p: NovelProject) => ({
+            ...INITIAL_PROJECT,
+            ...p,
+            aiConfig: p.aiConfig || INITIAL_PROJECT.aiConfig
+          }));
+        }
       }
       // Migration
       const oldSaved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
       if (oldSaved) {
         const oldProject = JSON.parse(oldSaved);
-        return [oldProject];
+        return [{
+          ...INITIAL_PROJECT,
+          ...oldProject,
+          aiConfig: oldProject.aiConfig || INITIAL_PROJECT.aiConfig
+        }];
       }
     } catch (e) {
       console.error('LocalStorage access failed during init', e);

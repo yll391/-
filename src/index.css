@@ -1,50 +1,62 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Playfair Display", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  --font-editorial: "Cormorant Garamond", serif;
 
-  --color-brand-50: #fdfcfb;
-  --color-brand-100: #f5f2ed;
-  --color-brand-200: #e7e2da;
-  --color-brand-300: #d1c9bc;
-  --color-brand-400: #a89e8d;
-  --color-brand-500: #7c7263;
-  --color-brand-600: #5a5247;
-  --color-brand-700: #453e35;
-  --color-brand-800: #2d2822;
-  --color-brand-900: #1a1814;
+  --color-win-bg: #f3f3f3;
+  --color-win-surface: rgba(255, 255, 255, 0.7);
+  --color-win-border: rgba(0, 0, 0, 0.05);
+  --color-win-accent: #0067c0;
+  --color-win-accent-hover: #005fb8;
 }
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 font-sans antialiased;
-  }
-
-  h1, h2, h3, h4 {
-    @apply font-sans font-bold tracking-tight;
+    @apply bg-slate-900 text-slate-900 font-sans antialiased overflow-hidden h-screen w-screen;
+    background-image: url('https://picsum.photos/seed/windows11/1920/1080');
+    background-size: cover;
+    background-position: center;
   }
 }
 
-/* Prism Markdown Highlighting */
-.token.header { color: #1a1814; font-weight: bold; }
-.token.bold { font-weight: bold; }
-.token.italic { font-style: italic; }
-.token.list { color: #7c7263; }
-.token.blockquote { color: #7c7263; font-style: italic; border-left: 2px solid #e7e2da; padding-left: 10px; }
-.token.code { font-family: var(--font-mono); background: #f5f2ed; padding: 0 4px; border-radius: 4px; }
-.token.url { color: #453e35; text-decoration: underline; }
+.win-mica {
+  backdrop-filter: blur(20px) saturate(180%);
+  background-color: rgba(243, 243, 243, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
 
-.markdown-body {
-  @apply prose prose-stone max-w-none prose-headings:font-serif prose-p:font-serif prose-p:text-lg prose-p:leading-relaxed prose-strong:text-brand-900 prose-blockquote:border-brand-200 prose-blockquote:bg-brand-100/30 prose-blockquote:rounded-r-xl prose-blockquote:py-1;
+.win-mica-dark {
+  backdrop-filter: blur(20px) saturate(180%);
+  background-color: rgba(32, 32, 32, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.win-shadow {
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
+.win-window-shadow {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.win-button {
+  @apply px-4 py-2 rounded-md transition-all duration-200 active:scale-95;
+}
+
+.win-taskbar-item {
+  @apply flex items-center justify-center w-10 h-10 rounded-md transition-all duration-200 hover:bg-white/10 active:scale-90;
+}
+
+.win-taskbar-item.active::after {
+  content: '';
+  @apply absolute bottom-1 w-1.5 h-0.5 bg-win-accent rounded-full;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -52,19 +64,29 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-brand-200/50 rounded-full hover:bg-brand-300/80 transition-colors;
+  @apply bg-slate-400/30 rounded-full hover:bg-slate-400/50 transition-colors;
 }
 
-/* UI Polish */
-.software-panel {
-  @apply bg-white border border-slate-200 shadow-sm;
+/* Window Animations */
+.window-enter {
+  opacity: 0;
+  transform: scale(0.95) translateY(20px);
 }
 
-.card-hover {
-  @apply transition-all duration-200 hover:border-slate-400;
+.window-enter-active {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition: opacity 200ms, transform 200ms;
 }
 
-.neo-blur {
-  background-color: white;
+.window-exit {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.window-exit-active {
+  opacity: 0;
+  transform: scale(0.95) translateY(20px);
+  transition: opacity 200ms, transform 200ms;
 }
 

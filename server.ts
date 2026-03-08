@@ -2,8 +2,12 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import { OpenAI } from "openai";
 import dotenv from "dotenv";
+import fs from "fs/promises";
+import path from "path";
 
 dotenv.config();
+
+const DATA_FILE = path.join(process.cwd(), "story_data.json");
 
 async function startServer() {
   const app = express();
@@ -11,9 +15,46 @@ async function startServer() {
 
   app.use(express.json());
 
-  // AI Proxy Route
+  // Persistence Routes
+  app.get("/api/story", async (req, res) => {
+    try {
+      const data = await fs.readFile(DATA_FILE, "utf-8");
+      res.json(JSON.parse(data));
+    } catch (error) {
+      // Return default state if file doesn't exist
+      const defaultBook = {
+        id: "book-1",
+        title: "未命名故事",
+        chapters: [{ id: "ch-1", title: "第一章", content: "", summary: "", order: 1 }],
+        characters: [],
+        relationships: [],
+        lore: [],
+        resources: { money: 100, supplies: 100 },
+        settings: {
+          logicRules: ["角色不能复活", "魔法消耗体力"],
+          targetFingerprint: { bloody: 20, poetic: 40, technical: 10, emotional: 30 }
+        }
+      };
+      res.json({
+        activeBookId: "book-1",
+        books: [defaultBook]
+      });
+    }
+  });
+
+  app.post("/api/story", async (req, res) => {
+    try {
+      await fs.writeFile(DATA_FILE, JSON.stringify(req.body, null, 2));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "保存失败" });
+    }
+  });
+
+  // AI Proxy Route (Optional, but keeping for compatibility if needed)
   app.post("/api/ai/generate", async (req, res) => {
     const { model, messages, temperature } = req.body;
+    // ... existing logic ...
 
     try {
       let apiKey = "";
