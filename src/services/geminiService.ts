@@ -5,11 +5,22 @@ let aiInstance: any = null;
 
 function getAI() {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY is not defined in the environment.");
+    let apiKey = "";
+    
+    // 兼容 Vite 本地环境 (import.meta.env) 和 Node/AI Studio 环境 (process.env)
+    if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
+      apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    } else if (typeof process !== "undefined" && process.env && process.env.GEMINI_API_KEY) {
+      apiKey = process.env.GEMINI_API_KEY;
     }
-    aiInstance = new GoogleGenAI({ apiKey: apiKey || "" });
+
+    if (!apiKey) {
+      console.error("未找到 Gemini API Key！请在项目根目录的 .env 文件中设置 VITE_GEMINI_API_KEY=你的密钥");
+      // 为了防止页面直接崩溃，传入一个假的 key，后续调用会报错但不会导致整个应用白屏
+      apiKey = "missing-api-key";
+    }
+    
+    aiInstance = new GoogleGenAI({ apiKey: apiKey });
   }
   return aiInstance;
 }
