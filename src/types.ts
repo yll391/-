@@ -1,21 +1,70 @@
-import React from 'react';
-
-export interface AppConfig {
-  id: string;
-  name: string;
-  icon: React.ReactNode;
-  component: React.ComponentType<any>;
-  isPinned?: boolean;
+export enum ContentType {
+  WORLD_SETTING = 'WORLD_SETTING',
+  CHARACTER = 'CHARACTER',
+  WRITING_RULE = 'WRITING_RULE',
+  CHAPTER = 'CHAPTER',
+  OUTLINE = 'OUTLINE',
+  STORY_RECAP = 'STORY_RECAP',
 }
 
-export interface WindowState {
+export interface PlotLine {
   id: string;
-  appId: string;
   title: string;
-  isOpen: boolean;
-  isMinimized: boolean;
-  isMaximized: boolean;
-  zIndex: number;
-  position: { x: number; y: number };
-  size: { width: number; height: number };
+  color: string;
+}
+
+export interface PlotEvent {
+  id: string;
+  title: string;
+  description: string;
+  chapterId?: string;
+  plotLineId?: string;
+  order: number;
+}
+
+export interface WorldSetting {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface Character {
+  id: string;
+  name: string;
+  description: string;
+  traits: string[];
+}
+
+export interface WritingRule {
+  id: string;
+  name: string;
+  rule: string;
+  isActive: boolean;
+}
+
+export interface Chapter {
+  id: string;
+  title: string;
+  content: string;
+  summary: string;
+  draft?: string;
+  order: number;
+  isExpanded?: boolean;
+  linkedContextIds?: string[];
+}
+
+export interface NovelProject {
+  id: string;
+  title: string;
+  worldSettings: WorldSetting[];
+  characters: Character[];
+  writingRules: WritingRule[];
+  chapters: Chapter[];
+  plotLines: PlotLine[];
+  plotEvents: PlotEvent[];
+  storyRecap: string;
+  aiConfig: {
+    temperature: number;
+    model: string;
+  };
 }

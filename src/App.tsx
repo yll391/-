@@ -34,7 +34,8 @@ import {
   Clock,
   Maximize2,
   Minimize2,
-  RefreshCw
+  RefreshCw,
+  BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -71,6 +72,7 @@ import {
 } from './types';
 import { 
   generateNovelContent, 
+  expandChapterContent,
   summarizeChapter, 
   checkConsistency, 
   generateInspiration,
@@ -108,6 +110,7 @@ const INITIAL_PROJECT: NovelProject = {
   plotEvents: [
     { id: 'pe1', title: '悬崖边的发现', description: '艾拉在悬崖边发现了一枚古老的徽章。', chapterId: 'ch1', plotLineId: 'pl1', order: 1 }
   ],
+  storyRecap: '',
   aiConfig: {
     temperature: 0.7,
     model: 'gemini-3-flash-preview'
@@ -143,6 +146,116 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     return this.props.children;
   }
 }
+
+const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateChapter, onUpdateEvent, onDeleteEvent, setActiveId, setActiveTab, deleteItem }: any) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: chapter.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const chapterEvents = project.plotEvents
+    .filter((e: PlotEvent) => e.chapterId === chapter.id)
+    .sort((a: PlotEvent, b: PlotEvent) => a.order - b.order);
+
+  return (
+    <div ref={setNodeRef} style={style} className="mb-4">
+      <div className="flex items-center gap-3 bg-white border border-brand-100 rounded-xl p-4 shadow-sm group">
+        <button {...attributes} {...listeners} className="text-brand-200 hover:text-brand-400 cursor-grab active:cursor-grabbing">
+          <GripVertical size={18} />
+        </button>
+        <button onClick={() => onToggle(chapter.id)} className="text-brand-400 hover:text-brand-900">
+          {chapter.isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </button>
+        <div className="flex-1">
+          <input 
+            type="text" 
+            value={chapter.title}
+            onChange={(e) => onUpdateChapter(chapter.id, { title: e.target.value })}
+            className="w-full bg-transparent border-none focus:ring-0 font-bold text-brand-900 p-0"
+            placeholder="章节标题..."
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => {
+              setActiveId(chapter.id);
+              setActiveTab(ContentType.CHAPTER);
+            }}
+            className="p-1.5 hover:bg-brand-50 rounded-lg text-brand-400 hover:text-brand-900 transition-all"
+            title="编辑章节"
+          >
+            <FileText size={16} />
+          </button>
+          <button 
+            onClick={() => deleteItem(ContentType.CHAPTER, chapter.id)}
+            className="p-1.5 hover:bg-red-50 rounded-lg text-brand-400 hover:text-red-500 transition-all"
+            title="删除章节"
+          >
+            <Trash2 size={16} />
+          </button>
+          <button 
+            onClick={() => onAddEvent(chapter.id)}
+            className="opacity-0 group-hover:opacity-100 p-1.5 bg-brand-50 text-brand-600 rounded-lg hover:bg-brand-100 transition-all flex items-center gap-1 text-[10px] font-bold uppercase"
+          >
+            <Plus size={12} /> 添加事件
+          </button>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {chapter.isExpanded && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="ml-12 mt-2 space-y-2 overflow-hidden"
+          >
+            {chapterEvents.map((event: PlotEvent) => (
+              <div key={event.id} className="flex gap-3 bg-brand-50/50 border border-brand-100/50 rounded-xl p-3 group/event">
+                <div className="w-1 bg-brand-200 rounded-full" />
+                <div className="flex-1 space-y-1">
+                  <input 
+                    type="text" 
+                    value={event.title}
+                    onChange={(e) => onUpdateEvent(event.id, { title: e.target.value })}
+                    className="w-full bg-transparent border-none focus:ring-0 font-medium text-sm text-brand-800 p-0"
+                    placeholder="事件标题..."
+                  />
+                  <textarea 
+                    value={event.description}
+                    onChange={(e) => onUpdateEvent(event.id, { description: e.target.value })}
+                    className="w-full bg-transparent border-none focus:ring-0 text-xs text-brand-500 p-0 resize-none"
+                    placeholder="事件描述..."
+                    rows={1}
+                  />
+                </div>
+                <button 
+                  onClick={() => onDeleteEvent(event.id)}
+                  className="opacity-0 group-hover/event:opacity-100 p-1 text-brand-300 hover:text-red-500 transition-all"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {chapterEvents.length === 0 && (
+              <div className="py-4 text-center border border-dashed border-brand-100 rounded-xl">
+                <p className="text-xs text-brand-300">暂无情节事件</p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 export default function App() {
   return (
@@ -206,6 +319,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<ContentType>(ContentType.CHAPTER);
   const [activeId, setActiveId] = useState<string>(project.chapters[0]?.id || '');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -220,6 +334,11 @@ function AppContent() {
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showContextPicker, setShowContextPicker] = useState(false);
+
+  const activeChapter = project.chapters.find(c => c.id === activeId);
+  const activeWorldSetting = project.worldSettings.find(s => s.id === activeId);
+  const activeCharacter = project.characters.find(c => c.id === activeId);
+  const activeWritingRule = project.writingRules.find(r => r.id === activeId);
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
@@ -464,6 +583,30 @@ function AppContent() {
     }
   };
 
+  const handleAiExpandChapter = async () => {
+    if (!activeId || activeTab !== ContentType.CHAPTER || !activeChapter?.draft) return;
+    
+    setIsGenerating(true);
+    try {
+      const result = await expandChapterContent(project, activeId, activeChapter.draft);
+      if (result && typeof result === 'string') {
+        const currentChapter = project.chapters.find(c => c.id === activeId);
+        if (currentChapter) {
+          const newContent = (currentChapter.content || '') + (currentChapter.content ? '\n\n' : '') + result;
+          updateChapter(activeId, { content: newContent });
+          showStatus('章节扩写成功！', 'success');
+        }
+      } else {
+        showStatus('AI 返回内容异常，请重试。', 'error');
+      }
+    } catch (error) {
+      console.error("AI Expand Error:", error);
+      showStatus('扩写失败，请检查网络或 API 密钥。', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleAiGenerate = async () => {
     if (!activeId || activeTab !== ContentType.CHAPTER) return;
     
@@ -601,6 +744,18 @@ function AppContent() {
     }
   };
 
+  const handleManualSave = () => {
+    try {
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, activeProjectId);
+      setLastSaved(new Date().toLocaleTimeString());
+      showStatus('已手动保存', 'success');
+    } catch (e) {
+      console.error('Failed to save projects to localStorage', e);
+      showStatus('保存失败', 'error');
+    }
+  };
+
   const createNewProject = () => {
     const newProject: NovelProject = {
       ...INITIAL_PROJECT,
@@ -610,7 +765,8 @@ function AppContent() {
       worldSettings: [],
       characters: [],
       writingRules: [],
-      plotEvents: []
+      plotEvents: [],
+      storyRecap: ''
     };
     setProjects(prev => [...prev, newProject]);
     setActiveProjectId(newProject.id);
@@ -763,137 +919,26 @@ function AppContent() {
     </div>
   );
 
-  const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateChapter, onUpdateEvent, onDeleteEvent }: any) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-    } = useSortable({ id: chapter.id });
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-    };
-
-    const chapterEvents = project.plotEvents
-      .filter((e: PlotEvent) => e.chapterId === chapter.id)
-      .sort((a: PlotEvent, b: PlotEvent) => a.order - b.order);
-
-    return (
-      <div ref={setNodeRef} style={style} className="mb-4">
-        <div className="flex items-center gap-3 bg-white border border-brand-100 rounded-xl p-4 shadow-sm group">
-          <button {...attributes} {...listeners} className="text-brand-200 hover:text-brand-400 cursor-grab active:cursor-grabbing">
-            <GripVertical size={18} />
-          </button>
-          <button onClick={() => onToggle(chapter.id)} className="text-brand-400 hover:text-brand-900">
-            {chapter.isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-          </button>
-          <div className="flex-1">
-            <input 
-              type="text" 
-              value={chapter.title}
-              onChange={(e) => onUpdateChapter(chapter.id, { title: e.target.value })}
-              className="w-full bg-transparent border-none focus:ring-0 font-bold text-brand-900 p-0"
-              placeholder="章节标题..."
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => {
-                setActiveId(chapter.id);
-                setActiveTab(ContentType.CHAPTER);
-              }}
-              className="p-1.5 hover:bg-brand-50 rounded-lg text-brand-400 hover:text-brand-900 transition-all"
-              title="编辑章节"
-            >
-              <FileText size={16} />
-            </button>
-            <button 
-              onClick={() => deleteItem(ContentType.CHAPTER, chapter.id)}
-              className="p-1.5 hover:bg-red-50 rounded-lg text-brand-400 hover:text-red-500 transition-all"
-              title="删除章节"
-            >
-              <Trash2 size={16} />
-            </button>
-            <button 
-              onClick={() => onAddEvent(chapter.id)}
-              className="opacity-0 group-hover:opacity-100 p-1.5 bg-brand-50 text-brand-600 rounded-lg hover:bg-brand-100 transition-all flex items-center gap-1 text-[10px] font-bold uppercase"
-            >
-              <Plus size={12} /> 添加事件
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {chapter.isExpanded && (
-            <motion.div 
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="ml-12 mt-2 space-y-2 overflow-hidden"
-            >
-              {chapterEvents.map((event: PlotEvent) => (
-                <div key={event.id} className="flex gap-3 bg-brand-50/50 border border-brand-100/50 rounded-xl p-3 group/event">
-                  <div className="w-1 bg-brand-200 rounded-full" />
-                  <div className="flex-1 space-y-1">
-                    <input 
-                      type="text" 
-                      value={event.title}
-                      onChange={(e) => onUpdateEvent(event.id, { title: e.target.value })}
-                      className="w-full bg-transparent border-none focus:ring-0 font-medium text-sm text-brand-800 p-0"
-                      placeholder="事件标题..."
-                    />
-                    <textarea 
-                      value={event.description}
-                      onChange={(e) => onUpdateEvent(event.id, { description: e.target.value })}
-                      className="w-full bg-transparent border-none focus:ring-0 text-xs text-brand-500 p-0 resize-none"
-                      placeholder="事件描述..."
-                      rows={1}
-                    />
-                  </div>
-                  <button 
-                    onClick={() => onDeleteEvent(event.id)}
-                    className="opacity-0 group-hover/event:opacity-100 p-1 text-brand-300 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-              {chapterEvents.length === 0 && (
-                <div className="py-4 text-center border border-dashed border-brand-100 rounded-xl">
-                  <p className="text-xs text-brand-300">暂无情节事件</p>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    );
+  const updatePlotEvent = (id: string, updates: Partial<PlotEvent>) => {
+    setProject(prev => ({
+      ...prev,
+      plotEvents: prev.plotEvents.map(e => e.id === id ? { ...e, ...updates } : e)
+    }));
   };
 
-  const OutlineView = () => {
-    const sortedChapters = [...project.chapters].sort((a, b) => a.order - b.order);
+  const deletePlotEvent = (id: string) => {
+    if (!confirm('确定要删除此事件吗？')) return;
+    setProject(prev => ({
+      ...prev,
+      plotEvents: prev.plotEvents.filter(e => e.id !== id)
+    }));
+  };
 
-    const updatePlotEvent = (id: string, updates: Partial<PlotEvent>) => {
-      setProject(prev => ({
-        ...prev,
-        plotEvents: prev.plotEvents.map(e => e.id === id ? { ...e, ...updates } : e)
-      }));
-    };
+  const sortedChapters = [...project.chapters].sort((a, b) => a.order - b.order);
 
-    const deletePlotEvent = (id: string) => {
-      if (!confirm('确定要删除此事件吗？')) return;
-      setProject(prev => ({
-        ...prev,
-        plotEvents: prev.plotEvents.filter(e => e.id !== id)
-      }));
-    };
-
-    return (
-      <div className="max-w-4xl mx-auto py-12 px-6">
-        <div className="flex items-center justify-between mb-8">
+  const renderOutlineView = () => (
+    <div className="max-w-4xl mx-auto py-12 px-6">
+      <div className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-3xl font-serif font-bold text-brand-900">大纲视图</h2>
             <p className="text-brand-500 mt-1">通过拖拽重新排序章节，管理情节线和主要事件。</p>
@@ -925,17 +970,15 @@ function AppContent() {
                 onUpdateChapter={updateChapter}
                 onUpdateEvent={updatePlotEvent}
                 onDeleteEvent={deletePlotEvent}
+                setActiveId={setActiveId}
+                setActiveTab={setActiveTab}
+                deleteItem={deleteItem}
               />
             ))}
           </SortableContext>
         </DndContext>
       </div>
-    );
-  };
-  const activeChapter = project.chapters.find(c => c.id === activeId);
-  const activeWorldSetting = project.worldSettings.find(s => s.id === activeId);
-  const activeCharacter = project.characters.find(c => c.id === activeId);
-  const activeWritingRule = project.writingRules.find(r => r.id === activeId);
+  );
 
   if (!project) {
     return (
@@ -1080,6 +1123,18 @@ function AppContent() {
             </div>
           </div>
 
+          {/* Story Recap */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+                <BookOpen size={14} /> 剧情提要
+              </h3>
+            </div>
+            <div className="space-y-1 px-2">
+              {renderSidebarItem('story-recap', '前情回顾', ContentType.STORY_RECAP, <BookOpen size={16} />)}
+            </div>
+          </div>
+
           {/* World Settings */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
@@ -1218,6 +1273,7 @@ function AppContent() {
                   <ChevronRight size={14} />
                   <span className="text-brand-900 font-serif italic">
                     {activeTab === ContentType.OUTLINE && "大纲视图"}
+                    {activeTab === ContentType.STORY_RECAP && "前情回顾"}
                     {activeTab === ContentType.CHAPTER && activeChapter?.title}
                     {activeTab === ContentType.WORLD_SETTING && activeWorldSetting?.title}
                     {activeTab === ContentType.CHARACTER && activeCharacter?.name}
@@ -1248,11 +1304,30 @@ function AppContent() {
                 
                 <div className="flex items-center gap-1 bg-brand-100/50 p-1 rounded-xl border border-brand-200/50">
                   <button 
+                    onClick={handleManualSave}
+                    className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                    title={`手动保存 (上次保存: ${lastSaved})`}
+                  >
+                    <Save size={16} />
+                  </button>
+                  <button 
                     onClick={() => setIsFocusMode(true)}
                     className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all"
                     title="专注模式"
                   >
                     <Maximize2 size={16} />
+                  </button>
+                  <button 
+                    onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
+                    className={cn(
+                      "p-2 rounded-lg transition-all",
+                      isRightSidebarOpen 
+                        ? "bg-brand-900 text-white shadow-md shadow-brand-900/20" 
+                        : "text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm"
+                    )}
+                    title="AI 扩写面板"
+                  >
+                    <Sliders size={16} />
                   </button>
                   <button 
                     onClick={() => setIsAiAssistantOpen(!isAiAssistantOpen)}
@@ -1285,14 +1360,37 @@ function AppContent() {
           </motion.button>
         )}
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className={cn(
-            "mx-auto py-12 px-6",
-            activeTab === ContentType.OUTLINE ? "max-w-5xl" : "max-w-3xl"
-          )}>
+        {/* Main Content & Right Sidebar Container */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className={cn(
+              "mx-auto py-12 px-6",
+              activeTab === ContentType.OUTLINE ? "max-w-5xl" : "max-w-3xl"
+            )}>
             {activeTab === ContentType.OUTLINE ? (
-              <OutlineView />
+              renderOutlineView()
+            ) : activeTab === ContentType.STORY_RECAP ? (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-3xl font-serif font-bold text-brand-900">前情回顾</h2>
+                    <p className="text-brand-500 mt-1">提炼并记录之前的剧情，帮助 AI 更好地回忆上下文，避免出现错觉。</p>
+                  </div>
+                </div>
+                <div className="bg-white rounded-2xl border border-brand-100 shadow-sm overflow-hidden flex flex-col h-[60vh]">
+                  <div className="p-4 border-b border-brand-100 bg-brand-50/50 flex items-center gap-2 text-brand-600">
+                    <BookOpen size={18} />
+                    <span className="font-medium text-sm">剧情提要</span>
+                  </div>
+                  <textarea
+                    value={project.storyRecap || ''}
+                    onChange={(e) => setProject(prev => ({ ...prev, storyRecap: e.target.value }))}
+                    className="flex-1 w-full p-6 bg-transparent border-none focus:ring-0 resize-none text-brand-800 leading-relaxed custom-scrollbar"
+                    placeholder="在这里写下前几十章的核心剧情、重要伏笔、角色状态等。AI 在生成新章节时会参考这些内容..."
+                  />
+                </div>
+              </div>
             ) : !activeId ? (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
                 <div className="w-16 h-16 bg-brand-50 rounded-full flex items-center justify-center text-brand-200">
@@ -1665,6 +1763,80 @@ function AppContent() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Right Sidebar (AI Chapter Expander) */}
+        <AnimatePresence>
+          {isRightSidebarOpen && activeTab === ContentType.CHAPTER && activeChapter && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 360, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="border-l border-brand-200/50 bg-white flex flex-col z-20 shadow-[-10px_0_20px_rgba(0,0,0,0.02)]"
+            >
+              <div className="p-5 border-b border-brand-200/50 flex items-center justify-between bg-brand-50/30">
+                <div className="flex items-center gap-2 text-brand-900">
+                  <Sliders size={16} />
+                  <h3 className="font-bold text-sm">AI 章节扩写</h3>
+                </div>
+                <button 
+                  onClick={() => setIsRightSidebarOpen(false)}
+                  className="p-1.5 text-brand-400 hover:text-brand-900 hover:bg-white rounded-lg transition-all"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-5">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-brand-500 flex items-center gap-2">
+                    <FileText size={12} /> 章节大纲 / 核心情节
+                  </label>
+                  <textarea
+                    value={activeChapter.draft || ''}
+                    onChange={(e) => updateChapter(activeChapter.id, { draft: e.target.value })}
+                    placeholder="在这里写下本章的大纲、你想发生的情节、人物的对话要点等。AI 将根据这些内容以及前情提要为你扩写出完整的章节..."
+                    className="w-full h-64 p-4 bg-brand-50/50 border border-brand-200/50 rounded-xl text-sm text-brand-800 resize-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-900/20 transition-all custom-scrollbar"
+                  />
+                </div>
+                
+                <div className="bg-brand-50/50 rounded-xl p-4 border border-brand-100">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-brand-500 mb-3 flex items-center gap-2">
+                    <Zap size={12} /> 扩写设置
+                  </h4>
+                  <div className="space-y-3 text-xs text-brand-600">
+                    <div className="flex items-center justify-between">
+                      <span>参考前情提要</span>
+                      <CheckCircle2 size={14} className={project.storyRecap ? "text-emerald-500" : "text-brand-300"} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>参考关联设定 ({activeChapter.linkedContextIds?.length || 0})</span>
+                      <CheckCircle2 size={14} className={(activeChapter.linkedContextIds?.length || 0) > 0 ? "text-emerald-500" : "text-brand-300"} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>应用写作规则 ({project.writingRules.filter(r => r.isActive).length})</span>
+                      <CheckCircle2 size={14} className={project.writingRules.filter(r => r.isActive).length > 0 ? "text-emerald-500" : "text-brand-300"} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="p-5 border-t border-brand-200/50 bg-white">
+                <button
+                  onClick={handleAiExpandChapter}
+                  disabled={isGenerating || !activeChapter.draft?.trim()}
+                  className={cn(
+                    "w-full py-3 rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-all shadow-sm",
+                    isGenerating || !activeChapter.draft?.trim()
+                      ? "bg-brand-100 text-brand-400 cursor-not-allowed"
+                      : "bg-brand-900 text-white hover:bg-brand-800 hover:shadow-md hover:shadow-brand-900/20"
+                  )}
+                >
+                  {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {isGenerating ? '正在扩写...' : '生成完整章节'}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         </div>
 
         {/* AI Assistant Panel */}

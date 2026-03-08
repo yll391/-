@@ -20,7 +20,7 @@ async function callAI(model: string, prompt: string, systemInstruction: string, 
     try {
       const response = await ai.models.generateContent({
         model,
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: prompt,
         config: {
           systemInstruction,
           temperature,
@@ -70,6 +70,7 @@ export async function generateNovelContent(
   const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n\n");
   const characterContext = project.characters.map(c => `${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
   const rulesContext = project.writingRules.filter(r => r.isActive).map(r => r.rule).join("\n");
+  const storyRecap = project.storyRecap || "无";
   const plotEventsContext = project.plotEvents
     .filter(e => e.chapterId === currentChapterId)
     .sort((a, b) => a.order - b.order)
@@ -97,14 +98,17 @@ ${worldContext}
 人物设定:
 ${characterContext}
 
-写作规则:
+写作规则 (请严格遵守):
 ${rulesContext}
 ${linkedContext}
+
+前情提要 (全局剧情回顾):
+${storyRecap}
 
 大纲 (本章情节事件):
 ${plotEventsContext || "本章尚未定义具体情节事件。"}
 
-前情提要:
+最近章节回顾:
 ${chapterContext}
 
 当前章节: ${currentChapter?.title || "新章节"}
@@ -113,7 +117,82 @@ ${chapterContext}
 指令:
 ${instruction}
 
-请确保生成的内容严格遵循上述的世界观设定、人物设定、写作规则，尤其是大纲中提供的情节。
+请确保生成的内容严格遵循上述的世界观设定、人物设定、写作规则，尤其是大纲中提供的情节和前情提要。
+`;
+
+  return callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.8
+  );
+}
+
+export async function expandChapterContent(
+  project: NovelProject,
+  currentChapterId: string,
+  draft: string
+) {
+  const currentChapter = project.chapters.find(c => c.id === currentChapterId);
+  const previousChapters = project.chapters
+    .filter(c => c.order < (currentChapter?.order || 0))
+    .sort((a, b) => a.order - b.order)
+    .slice(-3);
+
+  const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n\n");
+  const characterContext = project.characters.map(c => `${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
+  const rulesContext = project.writingRules.filter(r => r.isActive).map(r => r.rule).join("\n");
+  const storyRecap = project.storyRecap || "无";
+  
+  const chapterContext = previousChapters.map(c => `章节 ${c.order}: ${c.title}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
+
+  const linkedSettings = project.worldSettings.filter(s => currentChapter?.linkedContextIds?.includes(s.id));
+  const linkedCharacters = project.characters.filter(c => currentChapter?.linkedContextIds?.includes(c.id));
+
+  const linkedContext = linkedSettings.length > 0 || linkedCharacters.length > 0 ? `
+当前场景重点关注的上下文 (请务必在创作中体现这些元素):
+${linkedSettings.map(s => `- [设定] ${s.title}: ${s.content}`).join("\n")}
+${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n")}
+` : "";
+
+  const systemInstruction = `
+你是一位专业的小说作家。
+你的目标是帮助用户创作他们的小说《${project.title}》。
+你需要根据用户提供的“章节大纲/核心情节”扩写出完整、生动、细节丰富的章节内容。
+
+世界观设定:
+${worldContext}
+
+人物设定:
+${characterContext}
+
+写作规则 (请严格遵守):
+${rulesContext}
+${linkedContext}
+
+前情提要 (全局剧情回顾):
+${storyRecap}
+
+最近章节回顾:
+${chapterContext}
+
+当前章节: ${currentChapter?.title || "新章节"}
+当前已有内容 (如果有): ${currentChapter?.content || "无"}
+
+请确保扩写的内容:
+1. 严格遵循上述的世界观设定、人物设定和写作规则。
+2. 结合前情提要，保持剧情连贯，不出现逻辑错误或错觉。
+3. 语言生动，描写细腻，符合小说的整体风格。
+4. 仅仅输出扩写后的小说正文内容，不要包含任何解释、分析或多余的对话。
+`;
+
+  const prompt = `
+请根据以下大纲/核心情节，为当前章节扩写出完整的正文内容：
+
+【章节大纲/核心情节】
+${draft}
+
+如果当前章节已有内容，请自然地接续已有内容进行扩写；如果当前章节为空，请从头开始写。
 `;
 
   return callAI(
