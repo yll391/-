@@ -286,16 +286,17 @@ ${chaptersContext}
   );
 }
 
-export async function generateWorldSetting(project: NovelProject, title: string, currentContent: string) {
+export async function generateWorldSetting(project: NovelProject, title: string, currentContent: string, category?: string) {
   const systemInstruction = `你是一位充满想象力的世界构建师。你的任务是帮助作者完善小说《${project.title}》的世界设定。`;
   const prompt = `
 现有世界观概览:
-${project.worldSettings.map(s => `- ${s.title}: ${s.content}`).join("\n")}
+${project.worldSettings.map(s => `- ${s.title} (${s.category || '未分类'}): ${s.content.slice(0, 200)}...`).join("\n")}
 
 当前正在完善的设定标题: ${title}
+设定类别: ${category || "未分类"}
 当前内容: ${currentContent || "无"}
 
-请根据现有世界观，为这个特定设定提供详细、生动且具有逻辑自洽性的补充内容。
+请根据现有世界观和该设定的类别，为这个特定设定提供详细、生动且具有逻辑自洽性的补充内容。
 `;
   return callAI(
     project.aiConfig?.model || "gemini-3-flash-preview",
@@ -402,4 +403,44 @@ export async function summarizeChapter(content: string, model: string = "gemini-
   const prompt = `请用2-3句话总结以下小说章节内容，重点关注关键情节发展和人物变化：\n\n${content}`;
   
   return callAI(model, prompt, systemInstruction, 0.5);
+}
+
+export async function extractCharactersFromChapter(project: NovelProject, chapterContent: string) {
+  const systemInstruction = `
+你是一位专业的小说编辑。你的任务是从提供的章节内容中识别并提取出所有出现的人物。
+请分析人物的姓名、外貌特征、性格特点以及他们在该章节中的表现。
+
+输出格式必须为 JSON 数组:
+[
+  { "name": "角色姓名", "description": "角色简要描述", "traits": ["性格标签1", "性格标签2"] }
+]
+`;
+
+  const prompt = `
+小说标题: ${project.title}
+现有角色列表: ${project.characters.map(c => c.name).join(", ")}
+
+章节内容:
+${chapterContent}
+
+请提取新角色或更新现有角色的信息。如果角色已在现有列表中，请根据本章内容提供其在该章节的表现描述。
+`;
+
+  const response = await callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    0.7
+  );
+
+  try {
+    const jsonMatch = response.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    throw new Error("无法解析 AI 返回的人物提取数据");
+  } catch (e) {
+    console.error("AI Character Extraction Error:", e);
+    return [];
+  }
 }

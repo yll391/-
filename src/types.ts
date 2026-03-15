@@ -26,6 +26,8 @@ export interface WorldSetting {
   id: string;
   title: string;
   content: string;
+  category?: string;
+  order: number;
 }
 
 export interface Character {

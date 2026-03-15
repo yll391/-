@@ -35,13 +35,15 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
-  BookOpen
+  BookOpen,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-markdown';
 import ReactMarkdown from 'react-markdown';
+import { exportToTxt, exportToPdf } from './utils/exportUtils';
 import { 
   DndContext, 
   closestCenter,
@@ -81,8 +83,21 @@ import {
   generateCharacter,
   generateWritingRule,
   optimizePrompt,
-  planNextChapter
+  planNextChapter,
+  extractCharactersFromChapter
 } from './services/geminiService';
+
+const WORLD_SETTING_CATEGORIES = [
+  '世界观概览',
+  '地理环境',
+  '历史背景',
+  '力量体系',
+  '社会结构',
+  '种族文明',
+  '科技水平',
+  '风土人情',
+  '其他'
+];
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -96,7 +111,7 @@ const INITIAL_PROJECT: NovelProject = {
   id: '1',
   title: '我的史诗小说',
   worldSettings: [
-    { id: 'ws1', title: '世界观概览', content: '一个魔法由记忆驱动的世界。' }
+    { id: 'ws1', title: '世界观概览', content: '一个魔法由记忆驱动的世界。', category: '世界观概览', order: 1 }
   ],
   characters: [
     { id: 'c1', name: '艾拉', description: '一位失去了自己过去的年轻记忆编织者。', traits: ['坚定', '忧郁', '天赋异禀'] }
@@ -411,16 +426,27 @@ function AppContent() {
     setProject(prev => {
       const chapters = [...prev.chapters].sort((a, b) => a.order - b.order);
       const index = chapters.findIndex(c => c.id === id);
+      
       if (direction === 'up' && index > 0) {
-        const temp = chapters[index].order;
-        chapters[index].order = chapters[index - 1].order;
-        chapters[index - 1].order = temp;
+        const currentChapter = chapters[index];
+        const otherChapter = chapters[index - 1];
+        const newChapters = prev.chapters.map(c => {
+          if (c.id === id) return { ...c, order: otherChapter.order };
+          if (c.id === otherChapter.id) return { ...c, order: currentChapter.order };
+          return c;
+        });
+        return { ...prev, chapters: newChapters };
       } else if (direction === 'down' && index < chapters.length - 1) {
-        const temp = chapters[index].order;
-        chapters[index].order = chapters[index + 1].order;
-        chapters[index + 1].order = temp;
+        const currentChapter = chapters[index];
+        const otherChapter = chapters[index + 1];
+        const newChapters = prev.chapters.map(c => {
+          if (c.id === id) return { ...c, order: otherChapter.order };
+          if (c.id === otherChapter.id) return { ...c, order: currentChapter.order };
+          return c;
+        });
+        return { ...prev, chapters: newChapters };
       }
-      return { ...prev, chapters };
+      return prev;
     });
   };
 
@@ -428,11 +454,47 @@ function AppContent() {
     const newSetting: WorldSetting = {
       id: generateId(),
       title: '新设定',
-      content: ''
+      content: '',
+      category: '其他',
+      order: project.worldSettings.length > 0 ? Math.max(...project.worldSettings.map(s => s.order)) + 1 : 1
     };
     setProject(prev => ({ ...prev, worldSettings: [...prev.worldSettings, newSetting] }));
     setActiveId(newSetting.id);
     setActiveTab(ContentType.WORLD_SETTING);
+  };
+
+  const moveWorldSetting = (id: string, direction: 'up' | 'down') => {
+    setProject(prev => {
+      const currentSetting = prev.worldSettings.find(s => s.id === id);
+      if (!currentSetting) return prev;
+
+      const category = currentSetting.category || '其他';
+      const settingsInCategory = prev.worldSettings
+        .filter(s => (s.category || '其他') === category)
+        .sort((a, b) => a.order - b.order);
+      
+      const index = settingsInCategory.findIndex(s => s.id === id);
+      
+      if (direction === 'up' && index > 0) {
+        const otherSetting = settingsInCategory[index - 1];
+        const newSettings = prev.worldSettings.map(s => {
+          if (s.id === id) return { ...s, order: otherSetting.order };
+          if (s.id === otherSetting.id) return { ...s, order: currentSetting.order };
+          return s;
+        });
+        return { ...prev, worldSettings: newSettings };
+      } else if (direction === 'down' && index < settingsInCategory.length - 1) {
+        const otherSetting = settingsInCategory[index + 1];
+        const newSettings = prev.worldSettings.map(s => {
+          if (s.id === id) return { ...s, order: otherSetting.order };
+          if (s.id === otherSetting.id) return { ...s, order: currentSetting.order };
+          return s;
+        });
+        return { ...prev, worldSettings: newSettings };
+      }
+      
+      return prev;
+    });
   };
 
   const addCharacter = () => {
@@ -508,6 +570,50 @@ function AppContent() {
       ...prev,
       writingRules: prev.writingRules.map(r => r.id === id ? { ...r, ...updates } : r)
     }));
+  };
+
+  const handleExtractCharacters = async () => {
+    if (!activeId || activeTab !== ContentType.CHAPTER || !activeChapter?.content) {
+      showStatus('请先在章节中输入内容。', 'info');
+      return;
+    }
+    
+    setIsGenerating(true);
+    try {
+      const extracted = await extractCharactersFromChapter(project, activeChapter.content);
+      if (extracted && extracted.length > 0) {
+        setProject(prev => {
+          const newCharacters = [...prev.characters];
+          extracted.forEach((ext: any) => {
+            const existingIndex = newCharacters.findIndex(c => c.name === ext.name);
+            if (existingIndex !== -1) {
+              const existing = { ...newCharacters[existingIndex] };
+              if (existing.description.length < 50) {
+                existing.description = ext.description;
+              }
+              existing.traits = Array.from(new Set([...existing.traits, ...ext.traits]));
+              newCharacters[existingIndex] = existing;
+            } else {
+              newCharacters.push({
+                id: generateId(),
+                name: ext.name,
+                description: ext.description,
+                traits: ext.traits
+              });
+            }
+          });
+          return { ...prev, characters: newCharacters };
+        });
+        showStatus(`成功从本章提取并同步了 ${extracted.length} 位角色！`, 'success');
+      } else {
+        showStatus('未能在本章中识别到新角色。', 'info');
+      }
+    } catch (error) {
+      console.error(error);
+      showStatus('角色提取失败。', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleAiPlanNextChapter = async () => {
@@ -664,7 +770,7 @@ function AppContent() {
 
     setIsGenerating(true);
     try {
-      const result = await generateWorldSetting(project, setting.title, setting.content);
+      const result = await generateWorldSetting(project, setting.title, setting.content, setting.category);
       if (result) {
         updateWorldSetting(activeId, { content: (setting.content ? setting.content + '\n\n' : '') + result });
         showStatus('设定已补全！', 'success');
@@ -1150,10 +1256,28 @@ function AppContent() {
                 <Plus size={14} />
               </button>
             </div>
-            <div className="space-y-1 px-2">
-              {project.worldSettings.map(s => 
-                renderSidebarItem(s.id, s.title, ContentType.WORLD_SETTING, <Layout size={16} />)
-              )}
+            <div className="space-y-3 px-2">
+              {WORLD_SETTING_CATEGORIES.map(category => {
+                const settingsInCategory = project.worldSettings
+                  .filter(s => (s.category || '其他') === category)
+                  .sort((a, b) => a.order - b.order);
+                if (settingsInCategory.length === 0) return null;
+                return (
+                  <div key={category} className="space-y-1">
+                    <div className="px-2 py-0.5 text-[8px] font-bold text-brand-300 uppercase tracking-widest border-l border-brand-200 ml-2 mb-1">{category}</div>
+                    {settingsInCategory.map((s, idx, arr) => 
+                      renderSidebarItem(
+                        s.id, 
+                        s.title, 
+                        ContentType.WORLD_SETTING, 
+                        <Layout size={16} />,
+                        idx > 0 ? () => moveWorldSetting(s.id, 'up') : undefined,
+                        idx < arr.length - 1 ? () => moveWorldSetting(s.id, 'down') : undefined
+                      )
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1253,6 +1377,36 @@ function AppContent() {
               <Zap size={12} />
               灵感迸发
             </button>
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+                  <Download size={12} className="text-brand-900" /> 导出作品
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button 
+                  onClick={() => exportToTxt(project)}
+                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  title="导出为纯文本文件"
+                >
+                  TXT
+                </button>
+                <button 
+                  onClick={() => exportToPdf(project)}
+                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  title="导出为 PDF (可能不支持部分中文字体)"
+                >
+                  PDF
+                </button>
+                <button 
+                  onClick={() => window.print()}
+                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  title="使用浏览器打印功能保存为 PDF"
+                >
+                  打印
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </motion.aside>
@@ -1526,6 +1680,16 @@ function AppContent() {
                         </div>
                         <div className="flex items-center gap-2 bg-brand-100/50 p-1 rounded-xl">
                           <button 
+                            onClick={handleExtractCharacters}
+                            disabled={isGenerating || !activeChapter.content}
+                            className="px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 hover:bg-white transition-all flex items-center gap-2"
+                            title="从本章内容中提取人物并同步到档案"
+                          >
+                            {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Users size={12} />}
+                            提取人物
+                          </button>
+                          <div className="w-[1px] h-4 bg-brand-200 mx-1" />
+                          <button 
                             onClick={() => setIsPreviewMode(false)}
                             className={cn(
                               "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
@@ -1608,15 +1772,34 @@ function AppContent() {
                         <span className="flex items-center gap-2">
                           <FileText size={14} /> {getWordCount(activeWorldSetting.content)} 字
                         </span>
+                        <div className="flex items-center gap-2">
+                          <Layout size={14} />
+                          <select 
+                            value={activeWorldSetting.category || '其他'}
+                            onChange={(e) => updateWorldSetting(activeWorldSetting.id, { category: e.target.value })}
+                            className="bg-transparent border-none focus:ring-0 p-0 text-[10px] font-bold uppercase tracking-widest text-brand-400 cursor-pointer hover:text-brand-900 transition-colors"
+                          >
+                            {WORLD_SETTING_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
-                      <button 
+                      <motion.button 
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
                         onClick={handleGenerateWorldSetting}
                         disabled={isGenerating}
-                        className="flex items-center gap-2 px-5 py-2 bg-brand-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-brand-800 transition-all disabled:opacity-50 shadow-sm"
+                        className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-brand-800 transition-all disabled:opacity-50 shadow-lg shadow-brand-900/20 relative overflow-hidden group border border-brand-700/50"
                       >
-                        {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                        AI 补全设定
-                      </button>
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" />
+                        {isGenerating ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Sparkles size={14} className="text-amber-300 group-hover:rotate-12 transition-transform" />
+                        )}
+                        <span className="relative">AI 智能补全设定</span>
+                      </motion.button>
                     </div>
                     <textarea 
                       value={activeWorldSetting.content}
@@ -2206,6 +2389,21 @@ function AppContent() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Print Content (Hidden by default) */}
+      <div className="hidden print-content">
+        <h1 style={{ textAlign: 'center', fontSize: '32pt', marginBottom: '40pt' }}>{project.title}</h1>
+        {[...project.chapters].sort((a, b) => a.order - b.order).map(chapter => (
+          <div key={chapter.id} style={{ pageBreakAfter: 'always', marginBottom: '20pt' }}>
+            <h2 style={{ fontSize: '24pt', borderBottom: '1px solid #ccc', paddingBottom: '10pt', marginBottom: '20pt' }}>
+              第{chapter.order}章: {chapter.title}
+            </h2>
+            <div style={{ fontSize: '14pt', lineHeight: '1.8', whiteSpace: 'pre-wrap' }}>
+              {chapter.content}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

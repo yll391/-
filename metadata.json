@@ -1,5 +1,5 @@
 {
-  "name": "Win11 Web Desktop",
-  "description": "一个高仿 Windows 11 的 Web 桌面环境，支持窗口管理、多任务处理及本地部署指南。内置 AI 助手与实用工具。",
+  "name": "小说软件",
+  "description": "一款可以用gemin的ai写小说软件，功能有可以存放小说设定，人物设定，章节，写作规则，还可以联系上下文的程序",
   "requestFramePermissions": []
 }
