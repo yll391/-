@@ -38,7 +38,9 @@ import {
   BookOpen,
   Download,
   ShieldCheck,
-  Pin
+  Pin,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -394,6 +396,83 @@ function AppContent() {
   const activeWritingRule = project.writingRules.find(r => r.id === activeId);
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
+
+  // --- Undo/Redo Logic ---
+  const [history, setHistory] = useState<NovelProject[][]>([projects]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const isInternalUpdate = useRef(false);
+
+  useEffect(() => {
+    if (isInternalUpdate.current) {
+      isInternalUpdate.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setHistory(prev => {
+        const currentProjects = projects;
+        const lastInHistory = prev[historyIndex];
+        
+        if (JSON.stringify(lastInHistory) === JSON.stringify(currentProjects)) {
+          return prev;
+        }
+
+        const newHistory = prev.slice(0, historyIndex + 1);
+        newHistory.push(currentProjects);
+        
+        if (newHistory.length > 50) {
+          newHistory.shift();
+          setHistoryIndex(newHistory.length - 1);
+          return newHistory;
+        }
+        
+        setHistoryIndex(newHistory.length - 1);
+        return newHistory;
+      });
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [projects, historyIndex]);
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      isInternalUpdate.current = true;
+      const prevIndex = historyIndex - 1;
+      setHistoryIndex(prevIndex);
+      setProjects(history[prevIndex]);
+      showStatus('已撤回', 'info');
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      isInternalUpdate.current = true;
+      const nextIndex = historyIndex + 1;
+      setHistoryIndex(nextIndex);
+      setProjects(history[nextIndex]);
+      showStatus('已重做', 'info');
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          redo();
+        } else {
+          e.preventDefault();
+          undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [history, historyIndex]);
 
   useEffect(() => {
     try {
@@ -1558,6 +1637,23 @@ function AppContent() {
                 </AnimatePresence>
                 
                 <div className="flex items-center gap-1 bg-brand-100/50 p-1 rounded-xl border border-brand-200/50">
+                  <button 
+                    onClick={undo}
+                    disabled={historyIndex === 0}
+                    className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:shadow-none"
+                    title="撤回 (Ctrl+Z)"
+                  >
+                    <Undo2 size={16} />
+                  </button>
+                  <button 
+                    onClick={redo}
+                    disabled={historyIndex >= history.length - 1}
+                    className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:shadow-none"
+                    title="重做 (Ctrl+Y / Ctrl+Shift+Z)"
+                  >
+                    <Redo2 size={16} />
+                  </button>
+                  <div className="w-px h-4 bg-brand-200 mx-1" />
                   <button 
                     onClick={handleManualSave}
                     className="p-2 text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm rounded-lg transition-all"
