@@ -28,6 +28,7 @@ export interface WorldSetting {
   content: string;
   category?: string;
   order: number;
+  isLocked?: boolean;
 }
 
 export interface Character {
@@ -35,6 +36,7 @@ export interface Character {
   name: string;
   description: string;
   traits: string[];
+  isLocked?: boolean;
 }
 
 export interface WritingRule {
@@ -52,6 +54,7 @@ export interface Chapter {
   draft?: string;
   order: number;
   isExpanded?: boolean;
+  isPinnedForContext?: boolean;
   linkedContextIds?: string[];
 }
 

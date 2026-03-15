@@ -9,8 +9,8 @@ function getAI() {
     
     // 兼容 Vite 本地环境 (import.meta.env)
     try {
-      if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
-        apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (typeof import.meta !== "undefined" && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_API_KEY) {
+        apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
       }
     } catch (e) {
       // Ignore
@@ -84,13 +84,16 @@ export async function generateNovelContent(
   instruction: string = "根据提供的上下文继续故事。"
 ) {
   const currentChapter = project.chapters.find(c => c.id === currentChapterId);
+  const pinnedChapters = project.chapters.filter(c => c.isPinnedForContext && c.id !== currentChapterId);
   const previousChapters = project.chapters
-    .filter(c => c.order < (currentChapter?.order || 0))
+    .filter(c => c.order < (currentChapter?.order || 0) && !c.isPinnedForContext)
     .sort((a, b) => a.order - b.order)
-    .slice(-3); // Get last 3 chapters for context
+    .slice(-2); // Get last 2 non-pinned chapters
 
-  const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n\n");
-  const characterContext = project.characters.map(c => `${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
+  const allContextChapters = [...pinnedChapters, ...previousChapters].sort((a, b) => a.order - b.order);
+
+  const worldContext = project.worldSettings.map(s => `${s.title}${s.isLocked ? ' [已锁定-严禁修改]' : ''}: ${s.content}`).join("\n\n");
+  const characterContext = project.characters.map(c => `${c.name}${c.isLocked ? ' [已锁定-严禁修改]' : ''}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
   const rulesContext = project.writingRules.filter(r => r.isActive).map(r => r.rule).join("\n");
   const storyRecap = project.storyRecap || "无";
   const plotEventsContext = project.plotEvents
@@ -99,7 +102,7 @@ export async function generateNovelContent(
     .map(e => `- ${e.title}: ${e.description}`)
     .join("\n");
   
-  const chapterContext = previousChapters.map(c => `章节 ${c.order}: ${c.title}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
+  const chapterContext = allContextChapters.map(c => `章节 ${c.order}: ${c.title}${c.isPinnedForContext ? ' [关键上下文]' : ''}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
 
   const linkedSettings = project.worldSettings.filter(s => currentChapter?.linkedContextIds?.includes(s.id));
   const linkedCharacters = project.characters.filter(c => currentChapter?.linkedContextIds?.includes(c.id));
@@ -113,6 +116,14 @@ ${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c
   const systemInstruction = `
 你是一位专业的小说作家。
 你的目标是帮助用户创作他们的小说《${project.title}》。
+
+【核心准则：连贯性与一致性】
+1. 严禁违反已有的世界观设定和人物设定。
+2. 标注为 [已锁定] 的设定和人物是作者已经定稿的内容，你绝对不能在生成的内容中对其进行任何形式的修改或违背。
+3. 如果你的创作灵感确实需要对某个设定进行微调，请在正文结束后，以【设定修改建议】的形式列出，并用红色字体（在 Markdown 中可以使用 <font color="red">内容</font>）标注，询问作者是否允许修改。
+4. 确保情节与“前情提要”和“最近章节回顾”保持高度连贯。
+5. 留意人物的性格特征（Traits），确保对话和行为符合其性格。
+6. 如果之前的章节中提到了某个细节（如伤疤、物品、特定时间），请在后续创作中保持一致。
 
 世界观设定:
 ${worldContext}
@@ -130,7 +141,7 @@ ${storyRecap}
 大纲 (本章情节事件):
 ${plotEventsContext || "本章尚未定义具体情节事件。"}
 
-最近章节回顾:
+关键章节及最近章节回顾:
 ${chapterContext}
 
 当前章节: ${currentChapter?.title || "新章节"}
@@ -156,17 +167,20 @@ export async function expandChapterContent(
   draft: string
 ) {
   const currentChapter = project.chapters.find(c => c.id === currentChapterId);
+  const pinnedChapters = project.chapters.filter(c => c.isPinnedForContext && c.id !== currentChapterId);
   const previousChapters = project.chapters
-    .filter(c => c.order < (currentChapter?.order || 0))
+    .filter(c => c.order < (currentChapter?.order || 0) && !c.isPinnedForContext)
     .sort((a, b) => a.order - b.order)
-    .slice(-3);
+    .slice(-2);
 
-  const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n\n");
-  const characterContext = project.characters.map(c => `${c.name}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
+  const allContextChapters = [...pinnedChapters, ...previousChapters].sort((a, b) => a.order - b.order);
+
+  const worldContext = project.worldSettings.map(s => `${s.title}${s.isLocked ? ' [已锁定-严禁修改]' : ''}: ${s.content}`).join("\n\n");
+  const characterContext = project.characters.map(c => `${c.name}${c.isLocked ? ' [已锁定-严禁修改]' : ''}: ${c.description} (Traits: ${c.traits.join(", ")})`).join("\n\n");
   const rulesContext = project.writingRules.filter(r => r.isActive).map(r => r.rule).join("\n");
   const storyRecap = project.storyRecap || "无";
   
-  const chapterContext = previousChapters.map(c => `章节 ${c.order}: ${c.title}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
+  const chapterContext = allContextChapters.map(c => `章节 ${c.order}: ${c.title}${c.isPinnedForContext ? ' [关键上下文]' : ''}\n摘要: ${c.summary}\n内容: ${c.content.slice(-1000)}`).join("\n\n---\n\n");
 
   const linkedSettings = project.worldSettings.filter(s => currentChapter?.linkedContextIds?.includes(s.id));
   const linkedCharacters = project.characters.filter(c => currentChapter?.linkedContextIds?.includes(c.id));
@@ -182,6 +196,14 @@ ${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c
 你的目标是帮助用户创作他们的小说《${project.title}》。
 你需要根据用户提供的“章节大纲/核心情节”扩写出完整、生动、细节丰富的章节内容。
 
+【核心准则：连贯性与一致性】
+1. 严禁违反已有的世界观设定和人物设定。
+2. 标注为 [已锁定] 的设定和人物是作者已经定稿的内容，你绝对不能在生成的内容中对其进行任何形式的修改或违背。
+3. 如果你的创作灵感确实需要对某个设定进行微调，请在正文结束后，以【设定修改建议】的形式列出，并用红色字体（在 Markdown 中可以使用 <font color="red">内容</font>）标注，询问作者是否允许修改。
+4. 确保情节与“前情提要”和“最近章节回顾”保持高度连贯。
+5. 留意人物的性格特征（Traits），确保对话和行为符合其性格。
+6. 保持文风一致，细节严谨。
+
 世界观设定:
 ${worldContext}
 
@@ -195,7 +217,7 @@ ${linkedContext}
 前情提要 (全局剧情回顾):
 ${storyRecap}
 
-最近章节回顾:
+关键章节及最近章节回顾:
 ${chapterContext}
 
 当前章节: ${currentChapter?.title || "新章节"}
@@ -251,6 +273,29 @@ ${characterContext}
     `请为我提供一些${typeLabels[type]}。`,
     systemInstruction,
     0.9
+  );
+}
+
+export async function generateGlobalRecap(project: NovelProject) {
+  const chapterSummaries = project.chapters
+    .sort((a, b) => a.order - b.order)
+    .filter(c => c.summary)
+    .map(c => `章节 ${c.order} [${c.title}]: ${c.summary}`)
+    .join("\n");
+
+  if (!chapterSummaries) return "目前尚无章节摘要，无法生成全局提要。";
+
+  const systemInstruction = `你是一位专业的小说编辑。你的任务是将散乱的章节摘要整理成一份连贯、精炼的“前情提要”。
+这份提要应该概述目前为止的主要剧情走向、关键人物变动以及重要的世界观揭示。
+请确保语言流畅，逻辑清晰，适合作为后续创作的背景参考。`;
+
+  const prompt = `以下是小说的章节摘要：\n\n${chapterSummaries}\n\n请根据这些摘要生成一份全局前情提要。`;
+
+  return callAI(
+    project.aiConfig?.model || "gemini-3-flash-preview",
+    prompt,
+    systemInstruction,
+    0.6
   );
 }
 

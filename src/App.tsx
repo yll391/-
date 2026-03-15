@@ -36,13 +36,17 @@ import {
   Minimize2,
   RefreshCw,
   BookOpen,
-  Download
+  Download,
+  ShieldCheck,
+  Pin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-markdown';
 import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 import { exportToTxt, exportToPdf } from './utils/exportUtils';
 import { 
   DndContext, 
@@ -84,7 +88,8 @@ import {
   generateWritingRule,
   optimizePrompt,
   planNextChapter,
-  extractCharactersFromChapter
+  extractCharactersFromChapter,
+  generateGlobalRecap
 } from './services/geminiService';
 
 const WORLD_SETTING_CATEGORIES = [
@@ -167,7 +172,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateChapter, onUpdateEvent, onDeleteEvent, setActiveId, setActiveTab, deleteItem }: any) => {
+const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateChapter, onUpdateEvent, onDeleteEvent, setActiveId, setActiveTab, deleteItem, setIsRightSidebarOpen }: any) => {
   const {
     attributes,
     listeners,
@@ -209,21 +214,21 @@ const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateC
               setActiveId(chapter.id);
               setActiveTab(ContentType.CHAPTER);
             }}
-            className="p-1.5 hover:bg-brand-50 rounded-lg text-brand-400 hover:text-brand-900 transition-all"
+            className="p-1.5 hover:bg-black hover:text-white rounded-lg text-brand-400 transition-all"
             title="编辑章节"
           >
             <FileText size={16} />
           </button>
           <button 
             onClick={() => deleteItem(ContentType.CHAPTER, chapter.id)}
-            className="p-1.5 hover:bg-red-50 rounded-lg text-brand-400 hover:text-red-500 transition-all"
+            className="p-1.5 hover:bg-red-600 hover:text-white rounded-lg text-brand-400 transition-all"
             title="删除章节"
           >
             <Trash2 size={16} />
           </button>
           <button 
             onClick={() => onAddEvent(chapter.id)}
-            className="opacity-0 group-hover:opacity-100 p-1.5 bg-brand-50 text-brand-600 rounded-lg hover:bg-brand-100 transition-all flex items-center gap-1 text-[10px] font-bold uppercase"
+            className="opacity-0 group-hover:opacity-100 p-1.5 bg-black text-white rounded-lg hover:bg-brand-800 transition-all flex items-center gap-1 text-[10px] font-bold uppercase"
           >
             <Plus size={12} /> 添加事件
           </button>
@@ -252,22 +257,50 @@ const SortableChapterItem = ({ chapter, project, onToggle, onAddEvent, onUpdateC
                   <textarea 
                     value={event.description}
                     onChange={(e) => onUpdateEvent(event.id, { description: e.target.value })}
-                    className="w-full bg-transparent border-none focus:ring-0 text-xs text-brand-500 p-0 resize-none"
+                    className="w-full bg-brand-50/30 border border-transparent focus:border-brand-200 focus:bg-white rounded-lg p-2 text-xs text-brand-600 focus:ring-0 resize-none transition-all"
                     placeholder="事件描述..."
-                    rows={1}
+                    rows={3}
                   />
                 </div>
-                <button 
-                  onClick={() => onDeleteEvent(event.id)}
-                  className="opacity-0 group-hover/event:opacity-100 p-1 text-brand-300 hover:text-red-500 transition-all"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="flex flex-col gap-1">
+                  <button 
+                    onClick={() => onDeleteEvent(event.id)}
+                    className="opacity-0 group-hover/event:opacity-100 p-1.5 text-brand-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                    title="删除事件"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
+            
+            <div className="bg-brand-900/5 border border-dashed border-brand-900/20 rounded-xl p-4 mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
+                  <FileText size={12} /> 章节大纲 / 核心情节 (扩写依据)
+                </span>
+                <button 
+                  onClick={() => {
+                    setActiveId(chapter.id);
+                    setActiveTab(ContentType.CHAPTER);
+                    setIsRightSidebarOpen(true);
+                  }}
+                  className="text-[10px] font-bold text-brand-600 hover:text-brand-900 flex items-center gap-1"
+                >
+                  去编辑 <ChevronRight size={10} />
+                </button>
+              </div>
+              <textarea 
+                value={chapter.draft || ''}
+                onChange={(e) => onUpdateChapter(chapter.id, { draft: e.target.value })}
+                className="w-full bg-white/50 border border-brand-100 rounded-lg p-3 text-xs text-brand-700 focus:ring-0 focus:border-brand-300 resize-none min-h-[100px]"
+                placeholder="在这里写下本章的整体大纲，AI 扩写时将以此为准..."
+              />
+            </div>
+
             {chapterEvents.length === 0 && (
               <div className="py-4 text-center border border-dashed border-brand-100 rounded-xl">
-                <p className="text-xs text-brand-300">暂无情节事件</p>
+                <p className="text-xs text-brand-300">暂无具体情节事件</p>
               </div>
             )}
           </motion.div>
@@ -754,10 +787,48 @@ function AppContent() {
       if (summary) {
         updateChapter(activeId, { summary });
         showStatus('摘要已更新！', 'success');
+        
+        // Ask if user wants to update global recap
+        if (confirm('是否根据新的章节摘要自动更新全局前情提要？')) {
+          handleGenerateGlobalRecap();
+        }
       }
     } catch (error) {
       console.error(error);
       showStatus('摘要生成失败。', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateGlobalRecap = async () => {
+    setIsGenerating(true);
+    try {
+      const recap = await generateGlobalRecap(project);
+      if (recap) {
+        setProject(prev => ({ ...prev, storyRecap: recap }));
+        showStatus('全局前情提要已更新！', 'success');
+      }
+    } catch (error) {
+      console.error(error);
+      showStatus('生成全局提要失败。', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleCheckConsistency = async () => {
+    setIsGenerating(true);
+    try {
+      const result = await checkConsistency(project);
+      if (result) {
+        setReviewContent(result);
+        setShowReviewModal(true);
+        showStatus('一致性检查完成！', 'success');
+      }
+    } catch (error) {
+      console.error(error);
+      showStatus('检查失败。', 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -980,16 +1051,24 @@ function AppContent() {
     }));
   };
 
+  const togglePinChapter = (id: string) => {
+    setProject(prev => ({
+      ...prev,
+      chapters: prev.chapters.map(c => c.id === id ? { ...c, isPinnedForContext: !c.isPinnedForContext } : c)
+    }));
+  };
+
   // --- Render Helpers ---
 
-  const renderSidebarItem = (id: string, label: string, type: ContentType, icon: React.ReactNode, onMoveUp?: () => void, onMoveDown?: () => void) => (
+  const renderSidebarItem = (id: string, label: string, type: ContentType, icon: React.ReactNode, onMoveUp?: () => void, onMoveDown?: () => void, isPinned?: boolean, onTogglePin?: () => void) => (
     <div 
       key={id}
       className={cn(
-        "group flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-300",
+        "group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-all duration-200",
         activeId === id && activeTab === type 
-          ? "bg-white text-brand-900 shadow-sm border border-brand-200/50" 
-          : "text-brand-500 hover:bg-white/50 hover:text-brand-700"
+          ? "bg-black text-white shadow-md" 
+          : "text-brand-600 hover:bg-brand-100",
+        isPinned && activeId !== id && "border-l-2 border-black"
       )}
       onClick={() => {
         setActiveId(id);
@@ -998,21 +1077,33 @@ function AppContent() {
     >
       <div className="flex items-center gap-3 overflow-hidden">
         <div className={cn(
-          "p-1.5 rounded-lg transition-colors",
-          activeId === id && activeTab === type ? "bg-brand-900 text-white" : "bg-brand-100 text-brand-400 group-hover:text-brand-600"
+          "p-1 rounded-md transition-colors",
+          activeId === id && activeTab === type ? "text-white" : "text-brand-400 group-hover:text-black"
         )}>
           {icon}
         </div>
-        <span className="truncate text-xs font-medium tracking-tight">{label}</span>
+        <span className="truncate text-[11px] font-bold uppercase tracking-wider">{label}</span>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+        {onTogglePin && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onTogglePin(); }} 
+            className={cn(
+              "p-1 rounded-md transition-colors",
+              isPinned ? "text-white bg-white/20" : "hover:text-black hover:bg-black/10"
+            )}
+            title={isPinned ? "取消固定上下文" : "固定为关键上下文"}
+          >
+            <Pin size={10} className={isPinned ? "fill-current" : ""} />
+          </button>
+        )}
         {onMoveUp && (
-          <button onClick={(e) => { e.stopPropagation(); onMoveUp(); }} className="p-1 hover:text-brand-900 hover:bg-brand-100 rounded-md" title="上移">
+          <button onClick={(e) => { e.stopPropagation(); onMoveUp(); }} className="p-1 hover:text-black hover:bg-black/10 rounded-md" title="上移">
             <ArrowUp size={10} />
           </button>
         )}
         {onMoveDown && (
-          <button onClick={(e) => { e.stopPropagation(); onMoveDown(); }} className="p-1 hover:text-brand-900 hover:bg-brand-100 rounded-md" title="下移">
+          <button onClick={(e) => { e.stopPropagation(); onMoveDown(); }} className="p-1 hover:text-black hover:bg-black/10 rounded-md" title="下移">
             <ArrowDown size={10} />
           </button>
         )}
@@ -1021,7 +1112,7 @@ function AppContent() {
             e.stopPropagation();
             deleteItem(type, id);
           }}
-          className="p-1 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+          className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
           title="删除"
         >
           <Trash2 size={12} />
@@ -1084,6 +1175,7 @@ function AppContent() {
                 setActiveId={setActiveId}
                 setActiveTab={setActiveTab}
                 deleteItem={deleteItem}
+                setIsRightSidebarOpen={setIsRightSidebarOpen}
               />
             ))}
           </SortableContext>
@@ -1104,32 +1196,32 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden selection:bg-slate-200 selection:text-slate-900 relative font-sans">
+    <div className="flex h-screen bg-white overflow-hidden selection:bg-black selection:text-white relative font-sans text-black">
       {/* Sidebar */}
       <motion.aside 
         initial={false}
         animate={{ 
-          width: isSidebarOpen && !isFocusMode ? 260 : 0, 
+          width: isSidebarOpen && !isFocusMode ? 280 : 0, 
           opacity: isSidebarOpen && !isFocusMode ? 1 : 0,
         }}
-        className="border-r border-slate-200 bg-slate-50 flex flex-col overflow-hidden z-30"
+        className="border-r border-brand-200 bg-brand-50 flex flex-col overflow-hidden z-30"
       >
-        <div className="p-5 border-b border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white shadow-sm">
-                <Sparkles size={16} />
+        <div className="p-6 border-b border-brand-200">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center text-white shadow-xl shadow-black/20">
+                <Sparkles size={20} />
               </div>
-              <h1 className="text-lg font-bold tracking-tight text-slate-900">灵感作家</h1>
+              <h1 className="text-xl font-black tracking-tighter uppercase italic">MUSE WRITER</h1>
             </div>
             <button 
               onClick={() => setShowLibrary(!showLibrary)}
               className={cn(
-                "p-1.5 rounded-lg transition-all",
-                showLibrary ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                "p-2 rounded-xl transition-all",
+                showLibrary ? "bg-black text-white" : "text-brand-400 hover:bg-brand-200 hover:text-black"
               )}
             >
-              <Book size={16} />
+              <Book size={18} />
             </button>
           </div>
 
@@ -1143,8 +1235,8 @@ function AppContent() {
                 className="overflow-hidden space-y-3 mb-2"
               >
                 <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">我的书架</span>
-                  <button onClick={createNewProject} className="p-1 text-brand-500 hover:text-brand-900 hover:bg-brand-200/50 rounded-lg transition-colors">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-400">我的书架</span>
+                  <button onClick={createNewProject} className="p-1 text-brand-500 hover:text-black hover:bg-brand-200 rounded-lg transition-colors">
                     <Plus size={14} />
                   </button>
                 </div>
@@ -1164,7 +1256,7 @@ function AppContent() {
                       {projects.length > 1 && (
                         <button 
                           onClick={(e) => deleteProject(p.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-600 transition-opacity"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -1213,10 +1305,10 @@ function AppContent() {
           {/* Chapters */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <FileText size={14} /> 章节目录
               </h3>
-              <button onClick={addChapter} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
+              <button onClick={addChapter} className="p-1.5 hover:bg-black hover:text-white rounded-lg text-brand-400 transition-all">
                 <Plus size={14} />
               </button>
             </div>
@@ -1228,7 +1320,9 @@ function AppContent() {
                   ContentType.CHAPTER, 
                   <FileText size={16} />,
                   idx > 0 ? () => moveChapter(c.id, 'up') : undefined,
-                  idx < arr.length - 1 ? () => moveChapter(c.id, 'down') : undefined
+                  idx < arr.length - 1 ? () => moveChapter(c.id, 'down') : undefined,
+                  c.isPinnedForContext,
+                  () => togglePinChapter(c.id)
                 )
               )}
             </div>
@@ -1237,7 +1331,7 @@ function AppContent() {
           {/* Story Recap */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <BookOpen size={14} /> 剧情提要
               </h3>
             </div>
@@ -1249,10 +1343,10 @@ function AppContent() {
           {/* World Settings */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Layout size={14} /> 世界设定
               </h3>
-              <button onClick={addWorldSetting} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
+              <button onClick={addWorldSetting} className="p-1.5 hover:bg-black hover:text-white rounded-lg text-brand-400 transition-all">
                 <Plus size={14} />
               </button>
             </div>
@@ -1284,10 +1378,10 @@ function AppContent() {
           {/* Characters */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Users size={14} /> 人物档案
               </h3>
-              <button onClick={addCharacter} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
+              <button onClick={addCharacter} className="p-1.5 hover:bg-black hover:text-white rounded-lg text-brand-400 transition-all">
                 <Plus size={14} />
               </button>
             </div>
@@ -1301,10 +1395,10 @@ function AppContent() {
           {/* Rules */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-brand-400 flex items-center gap-2">
                 <Settings size={14} /> 写作规则
               </h3>
-              <button onClick={addWritingRule} className="p-1.5 hover:bg-white hover:shadow-sm rounded-xl text-brand-500 transition-all">
+              <button onClick={addWritingRule} className="p-1.5 hover:bg-black hover:text-white rounded-lg text-brand-400 transition-all">
                 <Plus size={14} />
               </button>
             </div>
@@ -1372,7 +1466,7 @@ function AppContent() {
           <div className="flex flex-col gap-2">
             <button 
               onClick={() => setShowInspirationModal(true)}
-              className="flex items-center justify-center gap-2 py-2.5 bg-brand-900 text-white rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-brand-800 transition-all shadow-lg shadow-brand-900/10 active:scale-[0.98]"
+              className="btn-primary flex items-center justify-center gap-2 py-3 text-[11px]"
             >
               <Zap size={12} />
               灵感迸发
@@ -1380,27 +1474,27 @@ function AppContent() {
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <span className="text-[9px] font-bold uppercase tracking-widest text-brand-400 flex items-center gap-2">
-                  <Download size={12} className="text-brand-900" /> 导出作品
+                  <Download size={12} className="text-black" /> 导出作品
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <button 
                   onClick={() => exportToTxt(project)}
-                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  className="flex items-center justify-center gap-2 bg-white border border-brand-200 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-black hover:text-white hover:border-black transition-all shadow-sm"
                   title="导出为纯文本文件"
                 >
                   TXT
                 </button>
                 <button 
                   onClick={() => exportToPdf(project)}
-                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  className="flex items-center justify-center gap-2 bg-white border border-brand-200 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-black hover:text-white hover:border-black transition-all shadow-sm"
                   title="导出为 PDF (可能不支持部分中文字体)"
                 >
                   PDF
                 </button>
                 <button 
                   onClick={() => window.print()}
-                  className="flex items-center justify-center gap-2 bg-white/80 border border-brand-200/50 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-brand-900 hover:text-white hover:border-brand-900 transition-all shadow-sm"
+                  className="flex items-center justify-center gap-2 bg-white border border-brand-200 rounded-xl text-[9px] font-bold text-brand-700 py-2 hover:bg-black hover:text-white hover:border-black transition-all shadow-sm"
                   title="使用浏览器打印功能保存为 PDF"
                 >
                   打印
@@ -1538,6 +1632,14 @@ function AppContent() {
                     <h2 className="text-3xl font-serif font-bold text-brand-900">前情回顾</h2>
                     <p className="text-brand-500 mt-1">提炼并记录之前的剧情，帮助 AI 更好地回忆上下文，避免出现错觉。</p>
                   </div>
+                  <button 
+                    onClick={handleGenerateGlobalRecap}
+                    disabled={isGenerating}
+                    className="btn-primary"
+                  >
+                    {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    AI 自动总结全文
+                  </button>
                 </div>
                 <div className="bg-white rounded-2xl border border-brand-100 shadow-sm overflow-hidden flex flex-col h-[60vh]">
                   <div className="p-4 border-b border-brand-100 bg-brand-50/50 flex items-center gap-2 text-brand-600">
@@ -1627,14 +1729,14 @@ function AppContent() {
                         <div className="flex items-center gap-4">
                           <button 
                             onClick={autoLinkContext}
-                            className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors"
+                            className="text-[10px] font-black uppercase tracking-widest text-brand-600 hover:text-black flex items-center gap-2 transition-colors"
                             title="根据内容自动关联设定与角色"
                           >
                             <Sparkles size={12} /> 自动关联
                           </button>
                           <button 
                             onClick={() => setShowContextPicker(true)}
-                            className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 flex items-center gap-2 transition-colors"
+                            className="text-[10px] font-black uppercase tracking-widest text-brand-600 hover:text-black flex items-center gap-2 transition-colors"
                           >
                             <Plus size={12} /> 手动关联
                           </button>
@@ -1655,7 +1757,7 @@ function AppContent() {
                                     const newIds = (activeChapter.linkedContextIds || []).filter(cid => cid !== id);
                                     updateChapter(activeChapter.id, { linkedContextIds: newIds });
                                   }}
-                                  className="hover:text-red-500 transition-colors"
+                                  className="hover:text-red-600 transition-colors"
                                 >
                                   <X size={12} />
                                 </button>
@@ -1682,7 +1784,7 @@ function AppContent() {
                           <button 
                             onClick={handleExtractCharacters}
                             disabled={isGenerating || !activeChapter.content}
-                            className="px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-brand-900 hover:bg-white transition-all flex items-center gap-2"
+                            className="btn-ghost flex items-center gap-2"
                             title="从本章内容中提取人物并同步到档案"
                           >
                             {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Users size={12} />}
@@ -1690,10 +1792,20 @@ function AppContent() {
                           </button>
                           <div className="w-[1px] h-4 bg-brand-200 mx-1" />
                           <button 
+                            onClick={handleCheckConsistency}
+                            disabled={isGenerating}
+                            className="btn-ghost flex items-center gap-2"
+                            title="检查全文一致性与连贯性"
+                          >
+                            {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                            连贯性检查
+                          </button>
+                          <div className="w-[1px] h-4 bg-brand-200 mx-1" />
+                          <button 
                             onClick={() => setIsPreviewMode(false)}
                             className={cn(
                               "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                              !isPreviewMode ? "bg-white text-brand-900 shadow-sm" : "text-brand-400 hover:text-brand-600"
+                              !isPreviewMode ? "bg-black text-white shadow-md" : "text-brand-400 hover:text-black"
                             )}
                           >
                             编辑
@@ -1702,7 +1814,7 @@ function AppContent() {
                             onClick={() => setIsAiAssistantOpen(true)}
                             className={cn(
                               "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                              isPreviewMode ? "bg-white text-brand-900 shadow-sm" : "text-brand-400 hover:text-brand-600"
+                              isPreviewMode ? "bg-black text-white shadow-md" : "text-brand-400 hover:text-black"
                             )}
                             onClickCapture={() => setIsPreviewMode(true)}
                           >
@@ -1713,7 +1825,7 @@ function AppContent() {
                       <div className="relative min-h-[600px] font-serif text-xl leading-relaxed text-brand-900">
                         {isPreviewMode ? (
                           <div className="markdown-body prose prose-brand max-w-none">
-                            <ReactMarkdown>{activeChapter.content}</ReactMarkdown>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{activeChapter.content}</ReactMarkdown>
                           </div>
                         ) : (
                           <Editor
@@ -1752,20 +1864,47 @@ function AppContent() {
                     className="space-y-10"
                   >
                     <div className="flex items-center justify-between group">
-                      <input 
-                        type="text"
-                        value={activeWorldSetting.title}
-                        onChange={(e) => updateWorldSetting(activeWorldSetting.id, { title: e.target.value })}
-                        className="w-full text-5xl font-serif font-bold border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent"
-                        placeholder="设定标题..."
-                      />
-                      <button 
-                        onClick={() => deleteItem(ContentType.WORLD_SETTING, activeWorldSetting.id)}
-                        className="p-3 text-brand-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"
-                        title="删除设定"
-                      >
-                        <Trash2 size={22} />
-                      </button>
+                      <div className="flex-1 flex items-center gap-4">
+                        <input 
+                          type="text"
+                          value={activeWorldSetting.title}
+                          onChange={(e) => updateWorldSetting(activeWorldSetting.id, { title: e.target.value })}
+                          disabled={activeWorldSetting.isLocked}
+                          className={cn(
+                            "w-full text-5xl font-serif font-bold border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent",
+                            activeWorldSetting.isLocked && "opacity-60 cursor-not-allowed"
+                          )}
+                          placeholder="设定标题..."
+                        />
+                        {activeWorldSetting.isLocked && (
+                          <span title="设定已锁定">
+                            <ShieldCheck size={24} className="text-emerald-500 shrink-0" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => updateWorldSetting(activeWorldSetting.id, { isLocked: !activeWorldSetting.isLocked })}
+                          className={cn(
+                            "p-3 rounded-2xl transition-all",
+                            activeWorldSetting.isLocked 
+                              ? "text-emerald-500 bg-emerald-50" 
+                              : "text-brand-300 hover:text-brand-900 hover:bg-brand-50"
+                          )}
+                          title={activeWorldSetting.isLocked ? "解锁设定" : "锁定设定 (AI 不可修改)"}
+                        >
+                          {activeWorldSetting.isLocked ? <ShieldCheck size={22} /> : <Pin size={22} />}
+                        </button>
+                        {!activeWorldSetting.isLocked && (
+                          <button 
+                            onClick={() => deleteItem(ContentType.WORLD_SETTING, activeWorldSetting.id)}
+                            className="p-3 text-brand-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"
+                            title="删除设定"
+                          >
+                            <Trash2 size={22} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center justify-between border-b border-brand-200/60 pb-4">
                       <div className="flex items-center gap-6 text-[10px] font-bold uppercase tracking-widest text-brand-400">
@@ -1789,7 +1928,7 @@ function AppContent() {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={handleGenerateWorldSetting}
-                        disabled={isGenerating}
+                        disabled={isGenerating || activeWorldSetting.isLocked}
                         className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-brand-800 transition-all disabled:opacity-50 shadow-lg shadow-brand-900/20 relative overflow-hidden group border border-brand-700/50"
                       >
                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" />
@@ -1804,7 +1943,11 @@ function AppContent() {
                     <textarea 
                       value={activeWorldSetting.content}
                       onChange={(e) => updateWorldSetting(activeWorldSetting.id, { content: e.target.value })}
-                      className="w-full min-h-[500px] text-xl font-serif leading-relaxed border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent resize-none"
+                      disabled={activeWorldSetting.isLocked}
+                      className={cn(
+                        "w-full min-h-[500px] text-xl font-serif leading-relaxed border-none focus:ring-0 p-0 text-brand-900 placeholder:text-brand-200 bg-transparent resize-none",
+                        activeWorldSetting.isLocked && "opacity-80 cursor-not-allowed"
+                      )}
                       placeholder="描述你的世界、魔法体系、历史..."
                     />
                   </motion.div>
@@ -1819,43 +1962,74 @@ function AppContent() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <input 
-                            type="text"
-                            value={activeCharacter.name}
-                            onChange={(e) => updateCharacter(activeCharacter.id, { name: e.target.value })}
-                            className="w-full text-4xl font-serif font-bold border-none focus:ring-0 p-0 placeholder:text-brand-200"
-                            placeholder="角色姓名..."
-                          />
-                          <button 
-                            onClick={() => deleteItem(ContentType.CHARACTER, activeCharacter.id)}
-                            className="p-2 text-brand-300 hover:text-red-500 transition-colors"
-                            title="删除角色"
-                          >
-                            <Trash2 size={20} />
-                          </button>
+                          <div className="flex-1 flex items-center gap-3">
+                            <input 
+                              type="text"
+                              value={activeCharacter.name}
+                              onChange={(e) => updateCharacter(activeCharacter.id, { name: e.target.value })}
+                              disabled={activeCharacter.isLocked}
+                              className={cn(
+                                "w-full text-4xl font-serif font-bold border-none focus:ring-0 p-0 placeholder:text-brand-200",
+                                activeCharacter.isLocked && "opacity-60 cursor-not-allowed"
+                              )}
+                              placeholder="角色姓名..."
+                            />
+                            {activeCharacter.isLocked && (
+                              <span title="角色已锁定">
+                                <ShieldCheck size={20} className="text-emerald-500 shrink-0" />
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => updateCharacter(activeCharacter.id, { isLocked: !activeCharacter.isLocked })}
+                              className={cn(
+                                "p-2 rounded-xl transition-all",
+                                activeCharacter.isLocked 
+                                  ? "text-emerald-500 bg-emerald-50" 
+                                  : "text-brand-300 hover:text-brand-900 hover:bg-brand-50"
+                              )}
+                              title={activeCharacter.isLocked ? "解锁角色" : "锁定角色 (AI 不可修改)"}
+                            >
+                              {activeCharacter.isLocked ? <ShieldCheck size={20} /> : <Pin size={20} />}
+                            </button>
+                            {!activeCharacter.isLocked && (
+                              <button 
+                                onClick={() => deleteItem(ContentType.CHARACTER, activeCharacter.id)}
+                                className="p-2 text-brand-300 hover:text-red-500 transition-colors"
+                                title="删除角色"
+                              >
+                                <Trash2 size={20} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2 mt-3">
                           {activeCharacter.traits.map((trait, idx) => (
                             <span key={idx} className="px-3 py-1 bg-brand-50 text-brand-600 rounded-full text-xs font-medium flex items-center gap-1">
                               {trait}
-                              <button onClick={() => {
-                                const newTraits = [...activeCharacter.traits];
-                                newTraits.splice(idx, 1);
-                                updateCharacter(activeCharacter.id, { traits: newTraits });
-                              }}>
-                                <X size={10} />
-                              </button>
+                              {!activeCharacter.isLocked && (
+                                <button onClick={() => {
+                                  const newTraits = [...activeCharacter.traits];
+                                  newTraits.splice(idx, 1);
+                                  updateCharacter(activeCharacter.id, { traits: newTraits });
+                                }}>
+                                  <X size={10} />
+                                </button>
+                              )}
                             </span>
                           ))}
-                          <button 
-                            onClick={() => {
-                              const trait = prompt('输入标签:');
-                              if (trait) updateCharacter(activeCharacter.id, { traits: [...activeCharacter.traits, trait] });
-                            }}
-                            className="px-3 py-1 border border-dashed border-brand-300 text-brand-400 rounded-full text-xs font-medium hover:border-brand-500 hover:text-brand-500"
-                          >
-                            + 添加标签
-                          </button>
+                          {!activeCharacter.isLocked && (
+                            <button 
+                              onClick={() => {
+                                const trait = prompt('输入标签:');
+                                if (trait) updateCharacter(activeCharacter.id, { traits: [...activeCharacter.traits, trait] });
+                              }}
+                              className="px-3 py-1 border border-dashed border-brand-300 text-brand-400 rounded-full text-xs font-medium hover:border-brand-500 hover:text-brand-500"
+                            >
+                              + 添加标签
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1868,7 +2042,7 @@ function AppContent() {
                           </span>
                           <button 
                             onClick={handleGenerateCharacter}
-                            disabled={isGenerating}
+                            disabled={isGenerating || activeCharacter.isLocked}
                             className="flex items-center gap-1 px-3 py-1 bg-brand-900 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-brand-800 transition-all disabled:opacity-50"
                           >
                             {isGenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
@@ -1879,7 +2053,11 @@ function AppContent() {
                       <textarea 
                         value={activeCharacter.description}
                         onChange={(e) => updateCharacter(activeCharacter.id, { description: e.target.value })}
-                        className="w-full min-h-[300px] text-lg leading-relaxed border-none focus:ring-0 p-0 placeholder:text-brand-200 resize-none"
+                        disabled={activeCharacter.isLocked}
+                        className={cn(
+                          "w-full min-h-[300px] text-lg leading-relaxed border-none focus:ring-0 p-0 placeholder:text-brand-200 resize-none",
+                          activeCharacter.isLocked && "opacity-80 cursor-not-allowed"
+                        )}
                         placeholder="这个角色是谁？他们的动机是什么？"
                       />
                     </div>
@@ -2013,12 +2191,7 @@ function AppContent() {
                 <button
                   onClick={handleAiExpandChapter}
                   disabled={isGenerating || !activeChapter.draft?.trim()}
-                  className={cn(
-                    "w-full py-3 rounded-xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-all shadow-sm",
-                    isGenerating || !activeChapter.draft?.trim()
-                      ? "bg-brand-100 text-brand-400 cursor-not-allowed"
-                      : "bg-brand-900 text-white hover:bg-brand-800 hover:shadow-md hover:shadow-brand-900/20"
-                  )}
+                  className="btn-primary w-full h-14 flex items-center justify-center gap-3"
                 >
                   {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                   {isGenerating ? '正在扩写...' : '生成完整章节'}
@@ -2088,7 +2261,7 @@ function AppContent() {
                           <button 
                             onClick={handleOptimizePrompt}
                             disabled={isGenerating}
-                            className="p-1.5 text-brand-400 hover:text-brand-900 transition-colors"
+                            className="p-1.5 text-brand-400 hover:text-black transition-colors"
                             title="魔法优化"
                           >
                             <Zap size={14} />
@@ -2104,7 +2277,7 @@ function AppContent() {
                         onClick={handleAiGenerate}
                         disabled={isGenerating}
                         className={cn(
-                          "h-14 px-8 rounded-2xl bg-brand-900 text-white font-bold uppercase tracking-widest text-xs flex items-center gap-3 hover:bg-brand-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-900/20",
+                          "btn-primary h-14 px-10 flex items-center gap-3",
                           isGenerating && "animate-pulse"
                         )}
                       >
@@ -2228,7 +2401,7 @@ function AppContent() {
               <div className="p-6 bg-brand-50/50 border-t border-brand-100">
                 <button 
                   onClick={() => setShowContextPicker(false)}
-                  className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-brand-800 transition-all"
+                  className="btn-primary w-full py-4 text-xs"
                 >
                   完成
                 </button>
@@ -2267,22 +2440,20 @@ function AppContent() {
                 </div>
                 <button 
                   onClick={() => setShowReviewModal(false)}
-                  className="p-2 hover:bg-brand-50 rounded-full text-brand-400 hover:text-brand-900 transition-colors"
+                  className="p-2 hover:bg-black hover:text-white rounded-full text-brand-400 transition-colors"
                 >
                   <X size={20} />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
                 <div className="prose prose-slate max-w-none">
-                  {reviewContent.split('\n').map((line, i) => (
-                    <p key={i} className="mb-4 text-brand-700 leading-relaxed">{line}</p>
-                  ))}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{reviewContent}</ReactMarkdown>
                 </div>
               </div>
               <div className="p-6 border-t border-brand-100 bg-brand-50/30 flex justify-end">
                 <button 
                   onClick={() => setShowReviewModal(false)}
-                  className="px-6 py-2 bg-brand-900 text-white rounded-xl font-medium hover:bg-brand-800 transition-colors"
+                  className="btn-primary px-8 py-3"
                 >
                   关闭
                 </button>
@@ -2324,7 +2495,7 @@ function AppContent() {
                     setShowInspirationModal(false);
                     setInspirationContent('');
                   }}
-                  className="p-2 hover:bg-brand-50 rounded-full text-brand-400 hover:text-brand-900 transition-colors"
+                  className="p-2 hover:bg-black hover:text-white rounded-full text-brand-400 transition-colors"
                 >
                   <X size={20} />
                 </button>
@@ -2362,9 +2533,7 @@ function AppContent() {
                   </div>
                 ) : inspirationContent ? (
                   <div className="prose prose-slate max-w-none">
-                    {inspirationContent.split('\n').map((line, i) => (
-                      <p key={i} className="mb-4 text-brand-700 leading-relaxed">{line}</p>
-                    ))}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{inspirationContent}</ReactMarkdown>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-center space-y-4 text-brand-300">
@@ -2380,7 +2549,7 @@ function AppContent() {
                     setShowInspirationModal(false);
                     setInspirationContent('');
                   }}
-                  className="px-6 py-2 bg-brand-900 text-white rounded-xl font-medium hover:bg-brand-800 transition-colors"
+                  className="btn-primary px-8 py-3"
                 >
                   关闭
                 </button>
