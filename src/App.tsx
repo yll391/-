@@ -404,53 +404,100 @@ function AppContent() {
   const [customApiKey, setCustomApiKey] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_key') || '' : '');
   const [customApiUrl, setCustomApiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_url') || '' : '');
   const [customApiModel, setCustomApiModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_model') || 'gemini-2.5-flash' : 'gemini-2.5-flash');
+  const [customApiProxy, setCustomApiProxy] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_proxy') || '' : '');
 
   const [inputApiKey, setInputApiKey] = useState('');
   const [inputApiUrl, setInputApiUrl] = useState('');
   const [inputApiModel, setInputApiModel] = useState('gemini-2.5-flash');
+  const [inputApiProxy, setInputApiProxy] = useState('');
   const [showKeyPassword, setShowKeyPassword] = useState(false);
+
+  // Connection Testing States
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    success?: boolean;
+    message?: string;
+    error?: string;
+    latency?: number;
+    details?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (showApiSettingsModal) {
       setInputApiKey(customApiKey);
       setInputApiUrl(customApiUrl);
       setInputApiModel(customApiModel);
+      setInputApiProxy(customApiProxy);
+      setConnectionTestResult(null);
     }
-  }, [showApiSettingsModal, customApiKey, customApiUrl, customApiModel]);
+  }, [showApiSettingsModal, customApiKey, customApiUrl, customApiModel, customApiProxy]);
+
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+    try {
+      const response = await fetch("/api/ai/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customApiKey: inputApiKey,
+          customApiUrl: inputApiUrl,
+          customApiProxy: inputApiProxy,
+          model: inputApiModel,
+        })
+      });
+      const data = await response.json();
+      setConnectionTestResult(data);
+    } catch (err: any) {
+      setConnectionTestResult({
+        success: false,
+        error: `代理服务器握手过程异常: ${err.message || err}`
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
 
   const handleSaveApiSettings = () => {
     const cleanKey = inputApiKey.trim();
     const cleanUrl = inputApiUrl.trim().replace(/\/+$/, "");
     const cleanModel = inputApiModel.trim();
+    const cleanProxy = inputApiProxy.trim();
 
     localStorage.setItem('custom_api_key', cleanKey);
     localStorage.setItem('custom_api_url', cleanUrl);
     localStorage.setItem('custom_api_model', cleanModel);
+    localStorage.setItem('custom_api_proxy', cleanProxy);
 
     setCustomApiKey(cleanKey);
     setCustomApiUrl(cleanUrl);
     setCustomApiModel(cleanModel);
+    setCustomApiProxy(cleanProxy);
 
     setShowApiSettingsModal(false);
-    showStatus('API 配置已安全保存！AI创作灵感现已实时就绪。', 'success');
+    showStatus('API 与网络代理配置已安全保存！AI 创作状态现已实时可用。', 'success');
   };
 
   const handleClearApiSettings = () => {
-    if (confirm("是否确认清空个人 API 配置并恢复为服务器默认环境？")) {
+    if (confirm("是否确认清空个人 API 与网络代理配置并恢复为系统预设环境？")) {
       localStorage.removeItem('custom_api_key');
       localStorage.removeItem('custom_api_url');
       localStorage.removeItem('custom_api_model');
+      localStorage.removeItem('custom_api_proxy');
 
       setCustomApiKey('');
       setCustomApiUrl('');
       setCustomApiModel('gemini-2.5-flash');
+      setCustomApiProxy('');
 
       setInputApiKey('');
       setInputApiUrl('');
       setInputApiModel('gemini-2.5-flash');
+      setInputApiProxy('');
 
+      setConnectionTestResult(null);
       setShowApiSettingsModal(false);
-      showStatus('已清空个人 API 配置修改，正在使用系统预置通道。', 'success');
+      showStatus('已清空个人 API 代理配置，已安全切回系统预设线路。', 'success');
     }
   };
 
@@ -3194,6 +3241,81 @@ function AppContent() {
                   <p className="text-[10px] text-brand-400 leading-relaxed">
                     所有写作、提纲生成与设定诊断将自适应使用选定模型。<b>Gemini 2.5 系列</b>在故事前后剧情连贯、笔风洗练程度、情绪张力描写上提升巨大。
                   </p>
+                </div>
+
+                {/* Clash / Network Proxy Input */}
+                <div className="space-y-1.5 bg-brand-50/30 p-4 rounded-2xl border border-brand-100">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-bold text-brand-800 tracking-wider uppercase flex items-center gap-1.5">
+                      <Globe size={12} className="text-brand-600" />
+                      Clash / 网络代理地址 (HTTP Proxy)
+                    </label>
+                    <span className="text-[9px] text-brand-400 font-mono font-bold">本地或海外代理</span>
+                  </div>
+                  <input 
+                    type="text"
+                    value={inputApiProxy}
+                    onChange={(e) => setInputApiProxy(e.target.value)}
+                    placeholder="例如 http://127.0.0.1:7890"
+                    className="w-full bg-white rounded-xl border border-brand-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 font-mono text-brand-800 shadow-sm"
+                  />
+                  <p className="text-[10px] text-brand-500 leading-relaxed">
+                    如果您在国内或受网络限制环境运行（使用 Clash、V2Ray、Shadowsocks 等代理客户端），请输入其提供的局域网代理端点（通常为 <code>http://127.0.0.1:7890</code> ）。开启后，系统后端发起的 Google API 连接请求将全自动通过该代理无障碍中折，保证响应不中断。
+                  </p>
+                </div>
+
+                {/* Connection Live Diagnostics */}
+                <div className="pt-4 border-t border-brand-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-brand-800 tracking-wider uppercase">通信握手自诊</span>
+                    <button
+                      type="button"
+                      disabled={isTestingConnection}
+                      onClick={handleTestConnection}
+                      className="px-4 py-1.5 text-[10px] font-bold text-brand-600 hover:text-white hover:bg-black border border-brand-300 rounded-xl hover:border-black transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isTestingConnection ? (
+                        <>
+                          <span className="w-2.5 h-2.5 rounded-full bg-brand-600 animate-ping inline-block" />
+                          <span>建立握手中...</span>
+                        </>
+                      ) : (
+                        "开始测试连接"
+                      )}
+                    </button>
+                  </div>
+
+                  {connectionTestResult && (
+                    <div className={`p-4 rounded-2xl text-[11px] space-y-1.5 border transition-all ${
+                      connectionTestResult.success 
+                        ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' 
+                        : 'bg-red-50/50 border-red-100 text-red-800'
+                    }`}>
+                      <div className="flex items-center gap-2 font-bold">
+                        <span className={`w-2 h-2 rounded-full ${connectionTestResult.success ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`} />
+                        <span>{connectionTestResult.success ? '网络连通，AI 通道畅通！' : '握手失败，网络连接阻断'}</span>
+                        {connectionTestResult.latency !== undefined && (
+                          <span className="px-1.5 py-0.5 rounded bg-white/70 font-mono text-[9px] ml-auto border border-brand-100 text-brand-700">
+                            RT Latency: {connectionTestResult.latency}ms
+                          </span>
+                        )}
+                      </div>
+                      {connectionTestResult.success ? (
+                        <p className="leading-relaxed opacity-95">
+                          {connectionTestResult.message || '系统成功接收到了 Gemini API 的微型内容回应！'} {connectionTestResult.details}
+                        </p>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="leading-relaxed font-semibold opacity-95">
+                            请求无法接通，推荐按照以下逻辑排查：
+                          </p>
+                          <p className="text-[10px] font-mono whitespace-normal break-all leading-relaxed p-2 bg-white/60 rounded-lg text-brand-900 border border-brand-100/30">
+                            {connectionTestResult.error || '连接超时，阻断了对 generativelanguage.googleapis.com 的网络寻址。请确认您的本地 Clash 是否运行，并在上方代理输入框进行正确的配置，或直接在 Base URL 换用可用的中转 Base URL。'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

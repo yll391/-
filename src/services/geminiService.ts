@@ -6,6 +6,7 @@ async function callAI(model: string, prompt: string, systemInstruction: string, 
     const customApiKey = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_key') || '') : '';
     const customApiUrl = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_url') || '') : '';
     const customApiModel = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_model') || '') : '';
+    const customApiProxy = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_proxy') || '') : '';
 
     const response = await fetch("/api/ai/generate", {
       method: "POST",
@@ -17,6 +18,7 @@ async function callAI(model: string, prompt: string, systemInstruction: string, 
         temperature,
         customApiKey,
         customApiUrl,
+        customApiProxy,
       }),
     });
     
