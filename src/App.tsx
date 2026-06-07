@@ -43,7 +43,9 @@ import {
   Redo2,
   Copy,
   Send,
-  Brain
+  Brain,
+  Key,
+  Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -396,6 +398,61 @@ function AppContent() {
   const [isAiWriting, setIsAiWriting] = useState(false);
   const [displayedPendingContent, setDisplayedPendingContent] = useState('');
   const [aiThought, setAiThought] = useState('');
+  
+  // --- AI API Configuration States ---
+  const [showApiSettingsModal, setShowApiSettingsModal] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_key') || '' : '');
+  const [customApiUrl, setCustomApiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_url') || '' : '');
+  const [customApiModel, setCustomApiModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('custom_api_model') || 'gemini-2.5-flash' : 'gemini-2.5-flash');
+
+  const [inputApiKey, setInputApiKey] = useState('');
+  const [inputApiUrl, setInputApiUrl] = useState('');
+  const [inputApiModel, setInputApiModel] = useState('gemini-2.5-flash');
+  const [showKeyPassword, setShowKeyPassword] = useState(false);
+
+  useEffect(() => {
+    if (showApiSettingsModal) {
+      setInputApiKey(customApiKey);
+      setInputApiUrl(customApiUrl);
+      setInputApiModel(customApiModel);
+    }
+  }, [showApiSettingsModal, customApiKey, customApiUrl, customApiModel]);
+
+  const handleSaveApiSettings = () => {
+    const cleanKey = inputApiKey.trim();
+    const cleanUrl = inputApiUrl.trim().replace(/\/+$/, "");
+    const cleanModel = inputApiModel.trim();
+
+    localStorage.setItem('custom_api_key', cleanKey);
+    localStorage.setItem('custom_api_url', cleanUrl);
+    localStorage.setItem('custom_api_model', cleanModel);
+
+    setCustomApiKey(cleanKey);
+    setCustomApiUrl(cleanUrl);
+    setCustomApiModel(cleanModel);
+
+    setShowApiSettingsModal(false);
+    showStatus('API 配置已安全保存！AI创作灵感现已实时就绪。', 'success');
+  };
+
+  const handleClearApiSettings = () => {
+    if (confirm("是否确认清空个人 API 配置并恢复为服务器默认环境？")) {
+      localStorage.removeItem('custom_api_key');
+      localStorage.removeItem('custom_api_url');
+      localStorage.removeItem('custom_api_model');
+
+      setCustomApiKey('');
+      setCustomApiUrl('');
+      setCustomApiModel('gemini-2.5-flash');
+
+      setInputApiKey('');
+      setInputApiUrl('');
+      setInputApiModel('gemini-2.5-flash');
+
+      setShowApiSettingsModal(false);
+      showStatus('已清空个人 API 配置修改，正在使用系统预置通道。', 'success');
+    }
+  };
 
   // --- AI Chat Sidebar States & Helpers ---
   interface ChatMessage {
@@ -1809,6 +1866,21 @@ function AppContent() {
                     <Maximize2 size={16} />
                   </button>
                   <button 
+                    onClick={() => setShowApiSettingsModal(true)}
+                    className={cn(
+                      "p-2 rounded-lg transition-all relative flex items-center justify-center",
+                      customApiKey
+                        ? "text-brand-500 hover:bg-white hover:text-emerald-500 hover:shadow-sm"
+                        : "text-red-500 bg-red-50/50 hover:bg-red-100/50 hover:shadow-sm"
+                    )}
+                    title={customApiKey ? "✨ 已配置自定义 AI 密钥" : "⚠️ 未配置个人 API 密钥 (点击配置)"}
+                  >
+                    <Key size={16} className={cn(!customApiKey && "animate-bounce duration-1000")} />
+                    {!customApiKey && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full border border-white animate-pulse" />
+                    )}
+                  </button>
+                  <button 
                     onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
                     className={cn(
                       "p-2 rounded-lg transition-all",
@@ -2462,6 +2534,14 @@ function AppContent() {
                 </div>
                 <div className="flex items-center gap-3">
                   <button 
+                    onClick={() => setShowApiSettingsModal(true)}
+                    className="text-[10px] font-bold uppercase tracking-widest text-brand-600 hover:text-black hover:bg-brand-50 border border-brand-200/50 rounded-xl px-2.5 py-1 flex items-center gap-1 transition-all"
+                    title="配置自定义 Gemini API Key 和代理地址"
+                  >
+                    <Settings size={10} />
+                    API设置
+                  </button>
+                  <button 
                     onClick={() => {
                       if (confirm("是否确认清空对话历史纪录？")) {
                         setChatMessages([
@@ -2995,6 +3075,149 @@ function AppContent() {
                 >
                   关闭
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* AI API Settings Modal */}
+      <AnimatePresence>
+        {showApiSettingsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" id="api-settings-modal">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowApiSettingsModal(false)}
+              className="absolute inset-0 bg-brand-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 border-b border-brand-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-brand-100 rounded-xl flex items-center justify-center text-brand-900">
+                    <Key size={18} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold">AI 智脑大模型配置</h2>
+                    <p className="text-[10px] text-brand-400">配置您专属的 Gemini / 兼容 API 调试密钥</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowApiSettingsModal(false)}
+                  className="p-2 hover:bg-black hover:text-white rounded-full text-brand-400 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-white">
+                {/* Instruction Banner */}
+                <div className="p-4 bg-emerald-50/50 border border-emerald-100/50 rounded-2xl text-xs space-y-1.5 text-emerald-800">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <CheckCircle2 size={13} className="text-emerald-600" />
+                    <span>系统亮点: 100% 客户端安全存储</span>
+                  </div>
+                  <p className="leading-relaxed text-[11px] opacity-95">
+                    您的 API 密钥及配置均安全保存在您<b>个人的浏览器本地 (localStorage) 中</b>，系统不保存任何副本，绝不上传至任何第三方服务器。后端代理仅在服务器运行时进行一次性密文穿透中转，最大程度捍卫您的网络隐私。
+                  </p>
+                </div>
+
+                {/* API KEY Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-brand-700 tracking-wider uppercase">
+                    Gemini API KEY (密钥) *
+                  </label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type={showKeyPassword ? "text" : "password"}
+                      value={inputApiKey}
+                      onChange={(e) => setInputApiKey(e.target.value)}
+                      placeholder="AIzaSy... （请输入您的个人 Gemini API 密钥）"
+                      className="w-full bg-brand-50/25 rounded-xl border border-brand-200/50 px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 pr-12 font-mono"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowKeyPassword(!showKeyPassword)}
+                      className="absolute right-3.5 text-brand-400 hover:text-brand-900 text-[10px] font-bold select-none transition-colors"
+                    >
+                      {showKeyPassword ? "暗文" : "明文"}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-brand-400 leading-relaxed">
+                    还没有配置过 API 密钥？前往官方 <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-brand-900 border-b border-brand-900 font-semibold hover:text-brand-700">Google AI Studio</a> 免费注册一个，即可获得丰厚的免费调用限额，小说润色得心应手。
+                  </p>
+                </div>
+
+                {/* API Base URL Input */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-bold text-brand-700 tracking-wider uppercase flex items-center gap-1">
+                      <Globe size={11} />
+                      API 代理端点 (Base URL)
+                    </label>
+                    <span className="text-[9px] text-brand-400 font-mono font-bold">选填</span>
+                  </div>
+                  <input 
+                    type="url"
+                    value={inputApiUrl}
+                    onChange={(e) => setInputApiUrl(e.target.value)}
+                    placeholder="https://generativelanguage.googleapis.com"
+                    className="w-full bg-brand-50/25 rounded-xl border border-brand-200/50 px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 font-mono text-brand-800"
+                  />
+                  <p className="text-[10px] text-brand-400 leading-relaxed">
+                    默认留空代表直连 Google 官方端点。如果您由于特殊的网络访问限制，需要使用第三方服务商，请输入中转代理地址（例如 <code>https://api.your-custom-proxy.com</code> ）。本代理接口能无缝兼容各中转转发机制。
+                  </p>
+                </div>
+
+                {/* Model Selection */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-brand-700 tracking-wider uppercase">
+                    创作搭载模型 (Model)
+                  </label>
+                  <select 
+                    value={inputApiModel}
+                    onChange={(e) => setInputApiModel(e.target.value)}
+                    className="w-full bg-brand-50/25 rounded-xl border border-brand-200/50 px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 cursor-pointer text-brand-800"
+                  >
+                    <option value="gemini-2.5-flash">gemini-2.5-flash (极速新一代 - 强烈推荐)</option>
+                    <option value="gemini-2.5-pro">gemini-2.5-pro (高端硬核文学 - 极致推理与文笔)</option>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash (经典中阶极速模型)</option>
+                    <option value="gemini-1.5-pro">gemini-1.5-pro (经典高級深度思考模型)</option>
+                    <option value="gemini-3.5-flash">gemini-3.5-flash (新一代智能辅助模型)</option>
+                  </select>
+                  <p className="text-[10px] text-brand-400 leading-relaxed">
+                    所有写作、提纲生成与设定诊断将自适应使用选定模型。<b>Gemini 2.5 系列</b>在故事前后剧情连贯、笔风洗练程度、情绪张力描写上提升巨大。
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-brand-100 bg-brand-50/30 flex items-center justify-between gap-4">
+                <button 
+                  onClick={handleClearApiSettings}
+                  className="px-3.5 py-1.5 text-[10px] font-bold text-red-500 border border-red-200 hover:border-red-500 hover:bg-red-50/40 rounded-xl transition-all tracking-wider uppercase"
+                >
+                  还原默认
+                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowApiSettingsModal(false)}
+                    className="px-4 py-1.5 text-[10px] font-bold text-brand-600 hover:text-brand-900 hover:bg-brand-100 rounded-xl transition-all tracking-wider uppercase"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    onClick={handleSaveApiSettings}
+                    className="bg-black text-white hover:bg-brand-900 px-6 py-2 rounded-xl text-[10px] font-bold tracking-wider uppercase shadow-md transition-all"
+                  >
+                    保存配置
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

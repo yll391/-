@@ -3,14 +3,20 @@ import { NovelProject, Chapter } from "../types";
 
 async function callAI(model: string, prompt: string, systemInstruction: string, temperature: number = 0.7) {
   try {
+    const customApiKey = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_key') || '') : '';
+    const customApiUrl = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_url') || '') : '';
+    const customApiModel = typeof window !== 'undefined' ? (localStorage.getItem('custom_api_model') || '') : '';
+
     const response = await fetch("/api/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model,
+        model: customApiModel || model,
         prompt,
         systemInstruction,
         temperature,
+        customApiKey,
+        customApiUrl,
       }),
     });
     
