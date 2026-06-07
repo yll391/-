@@ -1,6 +1,6 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import { OpenAI } from "openai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
@@ -13,7 +13,40 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
+
+  // AI Proxy Route setup
+  app.post("/api/ai/generate", async (req, res) => {
+    try {
+      const { model, prompt, systemInstruction, temperature } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        return res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY" });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const actualModel = model?.includes("gemini") ? model : "gemini-2.5-flash";
+
+      const response = await ai.models.generateContent({
+        model: actualModel,
+        contents: prompt,
+        config: {
+          systemInstruction,
+          temperature: temperature || 0.7,
+        },
+      });
+
+      if (!response || !response.text) {
+        throw new Error("AI returned empty response");
+      }
+
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("AI Proxy Error:", error);
+      res.status(500).json({ error: error.message || "内容生成失败" });
+    }
+  });
 
   // Persistence Routes
   app.get("/api/story", async (req, res) => {
@@ -48,45 +81,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "保存失败" });
-    }
-  });
-
-  // AI Proxy Route (Optional, but keeping for compatibility if needed)
-  app.post("/api/ai/generate", async (req, res) => {
-    const { model, messages, temperature } = req.body;
-    // ... existing logic ...
-
-    try {
-      let apiKey = "";
-      let baseURL = "";
-
-      if (model.startsWith("qwen")) {
-        apiKey = process.env.QWEN_API_KEY || "";
-        baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-      } else if (model.startsWith("deepseek")) {
-        apiKey = process.env.DEEPSEEK_API_KEY || "";
-        baseURL = "https://api.deepseek.com";
-      }
-
-      if (!apiKey) {
-        return res.status(400).json({ error: `未配置模型 ${model} 的 API 密钥。` });
-      }
-
-      const openai = new OpenAI({
-        apiKey,
-        baseURL,
-      });
-
-      const response = await openai.chat.completions.create({
-        model,
-        messages,
-        temperature: temperature || 0.7,
-      });
-
-      res.json({ text: response.choices[0].message.content });
-    } catch (error: any) {
-      console.error("AI 生成错误:", error);
-      res.status(500).json({ error: error.message || "内容生成失败" });
     }
   });
 

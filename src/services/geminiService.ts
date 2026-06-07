@@ -1,79 +1,32 @@
 import { GoogleGenAI } from "@google/genai";
 import { NovelProject, Chapter } from "../types";
 
-let aiInstance: any = null;
-
-function getAI() {
-  if (!aiInstance) {
-    let apiKey = "";
-    
-    // 兼容 Vite 本地环境 (import.meta.env)
-    try {
-      if (typeof import.meta !== "undefined" && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_API_KEY) {
-        apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
-      }
-    } catch (e) {
-      // Ignore
-    }
-
-    // 兼容 Node 环境 (process.env)
-    try {
-      if (typeof process !== "undefined" && process.env && process.env.GEMINI_API_KEY) {
-        apiKey = process.env.GEMINI_API_KEY;
-      }
-    } catch (e) {
-      // Ignore
-    }
-
-    if (!apiKey) {
-      console.error("未找到 Gemini API Key！请在项目根目录的 .env 文件中设置 VITE_GEMINI_API_KEY=你的密钥");
-      // 为了防止页面直接崩溃，传入一个假的 key，后续调用会报错但不会导致整个应用白屏
-      apiKey = "missing-api-key";
-    }
-    
-    aiInstance = new GoogleGenAI({ apiKey: apiKey });
-  }
-  return aiInstance;
-}
-
 async function callAI(model: string, prompt: string, systemInstruction: string, temperature: number = 0.7) {
-  const ai = getAI();
-  if (model.includes("gemini")) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature,
-        },
-      });
-      
-      if (!response || !response.text) {
-        throw new Error("AI 返回了空响应。");
-      }
-      
-      return response.text;
-    } catch (error: any) {
-      console.error("Gemini API Error:", error);
-      throw new Error(error.message || "Gemini API 调用失败");
-    }
-  } else {
+  try {
     const response = await fetch("/api/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: prompt }
-        ],
+        prompt,
+        systemInstruction,
         temperature,
       }),
     });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP Error ${response.status}`);
+    }
+    
     const data = await response.json();
     if (data.error) throw new Error(data.error);
+    if (!data.text) throw new Error("AI 返回了空响应。");
+    
     return data.text;
+  } catch (error: any) {
+    console.error("AI API Error:", error);
+    throw new Error(error.message || "AI 调用失败");
   }
 }
 
@@ -124,6 +77,23 @@ ${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c
 4. 确保情节与“前情提要”和“最近章节回顾”保持高度连贯。
 5. 留意人物的性格特征（Traits），确保对话和行为符合其性格。
 6. 如果之前的章节中提到了某个细节（如伤疤、物品、特定时间），请在后续创作中保持一致。
+
+【输出格式要求】
+你的输出必须包含两个部分：
+1. <thought> 标签包裹的思考过程：简要说明你打算如何接续剧情、如何体现设定、以及你的创作思路。
+2. 标签之后的小说正文内容。
+
+【写作风格与纯净度要求 (极度重要)】
+1. 语言必须干净、简短、洗练。
+2. 正文的符号不要那么多，杜绝过度使用感叹号、省略号，避免任何 Markdown 加粗（**）或斜体（*）格式在正文中泛滥。
+3. 绝对不要输出任何套话、问候语或解释（例如“好的，这是你要的内容”、“本章结束”、“希望能帮到你”等废话）。除了 <thought> 标签和正文外，不要输出任何多余的字符。
+
+示例：
+<thought>
+我打算让主角在森林中遇到一个神秘的老人，通过老人的话语揭示世界观中的力量体系。
+</thought>
+主角走入密林。雾气渐浓，四周静谧无声。
+前方一棵古树下，盘腿坐着一位老人。老人睁开眼，目光锐利。
 
 世界观设定:
 ${worldContext}
@@ -203,6 +173,23 @@ ${linkedCharacters.map(c => `- [角色] ${c.name}: ${c.description} (Traits: ${c
 4. 确保情节与“前情提要”和“最近章节回顾”保持高度连贯。
 5. 留意人物的性格特征（Traits），确保对话和行为符合其性格。
 6. 保持文风一致，细节严谨。
+
+【输出格式要求】
+你的输出必须包含两个部分：
+1. <thought> 标签包裹的思考过程：简要说明你打算如何扩写大纲、如何体现关联设定、以及你的创作思路。
+2. 标签之后的小说正文内容。
+
+【写作风格与纯净度要求 (极度重要)】
+1. 语言必须干净、简短、洗练，描写生动但不冗余。
+2. 正文的符号不要那么多，杜绝过度使用感叹号、省略号，避免任何 Markdown 加粗（**）或斜体（*）格式在正文中泛滥。
+3. 绝对不要输出任何套话、问候语或解释（例如“好的，这是你要的内容”、“本章结束”、“希望能帮到你”等废话）。除了 <thought> 标签和正文外，不要输出任何多余的字符。
+
+示例：
+<thought>
+我将详细描写主角在集市上的心理活动，并通过环境描写烘托出紧张的气氛。
+</thought>
+集市上人声鼎沸。主角走在石板路上，握紧了藏在袖中的卷轴。
+远处的钟楼敲响了黄昏的第一声钟声。
 
 世界观设定:
 ${worldContext}
@@ -489,3 +476,81 @@ ${chapterContent}
     return [];
   }
 }
+
+export async function sendChatToAI(
+  project: NovelProject,
+  chatHistory: { role: 'user' | 'assistant'; content: string }[],
+  latestPrompt: string,
+  currentChapterId?: string
+) {
+  const worldContext = project.worldSettings.map(s => `${s.title}: ${s.content}`).join("\n\n");
+  const characterContext = project.characters.map(c => `${c.name}: ${c.description} (traits: ${c.traits.join(", ")})`).join("\n\n");
+  const rulesContext = project.writingRules.filter(r => r.isActive).map(r => r.rule).join("\n");
+  const storyRecap = project.storyRecap || "无";
+  
+  const currentChapter = currentChapterId ? project.chapters.find(c => c.id === currentChapterId) : null;
+  const recentChapters = project.chapters
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .slice(-3)
+    .map(c => `章节 ${c.order} [${c.title}]:\n摘要: ${c.summary}\n内容: ${c.content.slice(-800)}`)
+    .join("\n\n");
+
+  const historyString = chatHistory
+    .slice(-8) // keep last 8 messages for context window efficiency
+    .map(m => `${m.role === 'user' ? '用户' : '创作助手'}: ${m.content}`)
+    .join("\n\n");
+
+  const systemInstruction = `
+你是一位顶级的小说大纲策划、编剧大师和文学写作助理。
+你的目标是与作者（用户）共同探讨和创作小说《${project.title}》。
+
+作者可以向你咨询角色发展、大纲设计、逻辑校验，或者直接指令你“续写一个片段”、“将选中的文字重写/润色”等。
+你可以随时审阅小说的全部创作档案：
+- 【世界观设定】：
+${worldContext || "暂无定义设定"}
+- 【重要人物列表】：
+${characterContext || "暂无角色档案"}
+- 【写作规则修辞约束】：
+${rulesContext || "无特殊约束，请自由发挥，语言干净生动"}
+- 【全局剧情提要（前情回顾）】：
+${storyRecap}
+- 【最近写完的几个章节概要与内容】：
+${recentChapters || "当前正在创作第一章"}
+
+【当前正在撰写的章节】：
+- 【章节标题】：${currentChapter?.title || "未开始新章节"}
+- 【正文内容】：
+${currentChapter?.content || "（章节正文目前为空，你可以建议从开头开始写起）"}
+
+【输出格式控制（极其重要）】
+无论用户是向你闲聊询问、探求大纲逻辑，还是直接让你写小说段落，你的回答都必须严格遵照以下格式。
+在每次回复的最前方，你必须用 <thought> 标签包裹你的【深度构思本能（思考过程）】，在这个标签中，用1-2段洗练、有说服力的语言探讨你此时在人设立场、伏笔安排、冲突张力上的运笔考量。
+在 </thought> 标签闭合之后，输出你对用户的正式回应，不带任何客套的多余废话。
+
+格式范例：
+<thought>
+用户指令继续写男主和女主的林中雪夜温存。在人设方面，男主性格傲娇但内心温柔，女主则直白单纯。
+接下来，我将通过“林中雪景的清冷”与“篝火与主角眼神的温热”作对比，着墨两人的眼神博弈和动作交互，避免滥俗陈设。
+</thought>
+大雪初霁，篝火毕剥作响。男主坐在一根枯木上...
+`;
+
+  const prompt = `
+【之前的对话历史】：
+${historyString || "（新对话开始）"}
+
+【新消息】：
+用户：${latestPrompt}
+
+请策划大纲、背景或写作文字，先进行深度思考 <thought> ... </thought>，再输出最终应答正文：
+`;
+
+  return callAI(
+    project.aiConfig?.model || "gemini-3.5-flash",
+    prompt,
+    systemInstruction,
+    project.aiConfig?.temperature ?? 0.8
+  );
+}
+

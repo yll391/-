@@ -40,7 +40,10 @@ import {
   ShieldCheck,
   Pin,
   Undo2,
-  Redo2
+  Redo2,
+  Copy,
+  Send,
+  Brain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -91,7 +94,8 @@ import {
   optimizePrompt,
   planNextChapter,
   extractCharactersFromChapter,
-  generateGlobalRecap
+  generateGlobalRecap,
+  sendChatToAI
 } from './services/geminiService';
 
 const WORLD_SETTING_CATEGORIES = [
@@ -375,7 +379,6 @@ function AppContent() {
   const [activeId, setActiveId] = useState<string>(project.chapters[0]?.id || '');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
-  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -389,6 +392,42 @@ function AppContent() {
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showContextPicker, setShowContextPicker] = useState(false);
+  const [pendingAiContent, setPendingAiContent] = useState('');
+  const [isAiWriting, setIsAiWriting] = useState(false);
+  const [displayedPendingContent, setDisplayedPendingContent] = useState('');
+  const [aiThought, setAiThought] = useState('');
+
+  // --- AI Chat Sidebar States & Helpers ---
+  interface ChatMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    thought?: string;
+    timestamp: string;
+    isGenerating?: boolean;
+    type?: 'continuation' | 'general' | 'outline' | 'consistent' | 'idea';
+  }
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    return [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: `你好！我是你的小说 AI 创作助手。🧠✨\n\n你可以和我探讨大纲、设计人物卡、定制世界设定，或者对我说：\n- *“帮我继续写下一段，看主角如何应对强敌”*\n- *“帮我起几个修仙流世界观的地理环境词汇”*\n- *“帮我润色当前的内容，加重心理活动的起伏描写”* \n\n点击 AI 会话下方的 **【追加到当前章节】** 按钮，就能一键将桥段拼接到你的正文里！`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
+  });
+  const [collapsedThoughts, setCollapsedThoughts] = useState<Record<string, boolean>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isRightSidebarOpen && messagesEndRef.current) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  }, [chatMessages, isRightSidebarOpen]);
 
   const activeChapter = project.chapters.find(c => c.id === activeId);
   const activeWorldSetting = project.worldSettings.find(s => s.id === activeId);
@@ -806,19 +845,42 @@ function AppContent() {
     }
   };
 
+  useEffect(() => {
+    if (pendingAiContent && isAiWriting) {
+      let i = 0;
+      setDisplayedPendingContent('');
+      const speed = pendingAiContent.length > 500 ? 2 : 10;
+      const interval = setInterval(() => {
+        const step = pendingAiContent.length > 1000 ? 5 : 1;
+        i += step;
+        setDisplayedPendingContent(pendingAiContent.slice(0, i));
+        if (i >= pendingAiContent.length) {
+          clearInterval(interval);
+          setIsAiWriting(false);
+        }
+      }, speed);
+      return () => clearInterval(interval);
+    }
+  }, [pendingAiContent, isAiWriting]);
+
   const handleAiExpandChapter = async () => {
     if (!activeId || activeTab !== ContentType.CHAPTER || !activeChapter?.draft) return;
     
     setIsGenerating(true);
+    setPendingAiContent('');
+    setDisplayedPendingContent('');
+    setAiThought('');
     try {
       const result = await expandChapterContent(project, activeId, activeChapter.draft);
       if (result && typeof result === 'string') {
-        const currentChapter = project.chapters.find(c => c.id === activeId);
-        if (currentChapter) {
-          const newContent = (currentChapter.content || '') + (currentChapter.content ? '\n\n' : '') + result;
-          updateChapter(activeId, { content: newContent });
-          showStatus('章节扩写成功！', 'success');
-        }
+        const thoughtMatch = result.match(/<thought>([\s\S]*?)<\/thought>/);
+        const thought = thoughtMatch ? thoughtMatch[1].trim() : '';
+        const content = result.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
+        
+        setAiThought(thought);
+        setPendingAiContent(content);
+        setIsAiWriting(true);
+        showStatus('AI 已生成内容，请在待写入区查看。', 'info');
       } else {
         showStatus('AI 返回内容异常，请重试。', 'error');
       }
@@ -830,20 +892,87 @@ function AppContent() {
     }
   };
 
+  const handleSendChatMessage = async (presetPrompt?: string) => {
+    const textToSend = presetPrompt || aiPrompt;
+    if (!textToSend.trim() || isGenerating) return;
+
+    const userMsg: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: textToSend.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    setChatMessages(prev => [...prev, userMsg]);
+    if (!presetPrompt) setAiPrompt('');
+
+    setIsGenerating(true);
+
+    const tempAssistantId = `ai-${Date.now()}`;
+    const placeholderMsg: ChatMessage = {
+      id: tempAssistantId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isGenerating: true
+    };
+    setChatMessages(prev => [...prev, placeholderMsg]);
+
+    try {
+      const simplifiedHistory = chatMessages
+        .concat(userMsg)
+        .filter(m => !m.isGenerating && m.id !== 'welcome')
+        .map(m => ({ role: m.role, content: m.content }));
+
+      const result = await sendChatToAI(project, simplifiedHistory, textToSend.trim(), activeId || undefined);
+
+      if (result && typeof result === 'string') {
+        const thoughtMatch = result.match(/<thought>([\s\S]*?)<\/thought>/);
+        const thought = thoughtMatch ? thoughtMatch[1].trim() : '';
+        const content = result.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
+
+        setChatMessages(prev => prev.map(m => {
+          if (m.id === tempAssistantId) {
+            return {
+              ...m,
+              content,
+              thought,
+              isGenerating: false
+            };
+          }
+          return m;
+        }));
+      } else {
+        throw new Error('Empty AI response');
+      }
+    } catch (error) {
+      console.error("AI Chat Error:", error);
+      showStatus('AI 响应失败，请检查网络或 API 密钥。', 'error');
+      setChatMessages(prev => prev.filter(m => m.id !== tempAssistantId));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleAiGenerate = async () => {
     if (!activeId || activeTab !== ContentType.CHAPTER) return;
     
     setIsGenerating(true);
+    setPendingAiContent('');
+    setDisplayedPendingContent('');
+    setAiThought('');
     try {
       const result = await generateNovelContent(project, activeId, aiPrompt || "请自然地继续故事。");
       if (result && typeof result === 'string') {
-        const currentChapter = project.chapters.find(c => c.id === activeId);
-        if (currentChapter) {
-          const newContent = (currentChapter.content || '') + '\n\n' + result;
-          updateChapter(activeId, { content: newContent });
-          setAiPrompt('');
-          showStatus('内容生成成功！', 'success');
-        }
+        const thoughtMatch = result.match(/<thought>([\s\S]*?)<\/thought>/);
+        const thought = thoughtMatch ? thoughtMatch[1].trim() : '';
+        const content = result.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
+
+        setAiThought(thought);
+        setPendingAiContent(content);
+        setIsAiWriting(true);
+        setAiPrompt('');
+        showStatus('AI 已生成内容，请在待写入区查看。', 'info');
       } else {
         showStatus('AI 返回内容异常，请重试。', 'error');
       }
@@ -853,6 +982,26 @@ function AppContent() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleAcceptAiContent = () => {
+    if (!activeId || !pendingAiContent) return;
+    const currentChapter = project.chapters.find(c => c.id === activeId);
+    if (currentChapter) {
+      const newContent = (currentChapter.content || '') + (currentChapter.content ? '\n\n' : '') + pendingAiContent;
+      updateChapter(activeId, { content: newContent });
+      setPendingAiContent('');
+      setDisplayedPendingContent('');
+      setAiThought('');
+      showStatus('内容已填入章节。', 'success');
+    }
+  };
+
+  const handleDiscardAiContent = () => {
+    setPendingAiContent('');
+    setDisplayedPendingContent('');
+    setAiThought('');
+    showStatus('已丢弃 AI 生成内容。', 'info');
   };
 
   const handleSummarize = async () => {
@@ -1506,17 +1655,8 @@ function AppContent() {
                   <optgroup label="Google Gemini">
                     <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite (免费/极速)</option>
                     <option value="gemini-3-flash-preview">Gemini 3 Flash (免费/均衡)</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (免费/稳定)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (稳定)</option>
                     <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (强大/推理)</option>
-                  </optgroup>
-                  <optgroup label="Alibaba Qwen">
-                    <option value="qwen-max">Qwen Max</option>
-                    <option value="qwen-plus">Qwen Plus</option>
-                    <option value="qwen-turbo">Qwen Turbo</option>
-                  </optgroup>
-                  <optgroup label="DeepSeek">
-                    <option value="deepseek-chat">DeepSeek Chat</option>
-                    <option value="deepseek-reasoner">DeepSeek Reasoner</option>
                   </optgroup>
                 </select>
                 <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-400 pointer-events-none group-hover/select:text-brand-900 transition-colors" />
@@ -1676,21 +1816,9 @@ function AppContent() {
                         ? "bg-brand-900 text-white shadow-md shadow-brand-900/20" 
                         : "text-brand-400 hover:text-brand-900 hover:bg-white hover:shadow-sm"
                     )}
-                    title="AI 扩写面板"
+                    title="AI 创作对话"
                   >
                     <Sliders size={16} />
-                  </button>
-                  <button 
-                    onClick={() => setIsAiAssistantOpen(!isAiAssistantOpen)}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                      isAiAssistantOpen 
-                        ? "bg-brand-900 text-white shadow-md shadow-brand-900/20" 
-                        : "text-brand-500 hover:text-brand-900 hover:bg-white hover:shadow-sm"
-                    )}
-                  >
-                    <Sparkles size={14} />
-                    助手
                   </button>
                 </div>
               </div>
@@ -1907,12 +2035,11 @@ function AppContent() {
                             编辑
                           </button>
                           <button 
-                            onClick={() => setIsAiAssistantOpen(true)}
+                            onClick={() => setIsPreviewMode(true)}
                             className={cn(
                               "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
                               isPreviewMode ? "bg-black text-white shadow-md" : "text-brand-400 hover:text-black"
                             )}
-                            onClickCapture={() => setIsPreviewMode(true)}
                           >
                             预览
                           </button>
@@ -1949,6 +2076,92 @@ function AppContent() {
                         )}
                       </div>
                     </div>
+
+                    {/* AI Pending Area */}
+                    <AnimatePresence>
+                      {(pendingAiContent || isGenerating) && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-12 space-y-6"
+                        >
+                          <div className="flex items-center justify-between border-b border-brand-200 pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-brand-900 text-white rounded-lg flex items-center justify-center">
+                                <Sparkles size={16} className={isGenerating ? "animate-pulse" : ""} />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-brand-900">AI 生成待写入区</h3>
+                                <p className="text-[10px] text-brand-400 uppercase tracking-widest">
+                                  {isGenerating ? "正在思考并构建内容..." : isAiWriting ? "正在可视化写入..." : "内容已就绪，请审阅"}
+                                </p>
+                              </div>
+                            </div>
+                            {!isGenerating && !isAiWriting && pendingAiContent && (
+                              <div className="flex items-center gap-3">
+                                <button 
+                                  onClick={handleDiscardAiContent}
+                                  className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                >
+                                  丢弃
+                                </button>
+                                <button 
+                                  onClick={handleAcceptAiContent}
+                                  className="px-6 py-2 bg-brand-900 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl shadow-lg shadow-brand-900/20 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                                >
+                                  <CheckCircle2 size={14} />
+                                  同意并填入
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="relative bg-brand-50/50 rounded-[32px] border-2 border-dashed border-brand-200 p-8 min-h-[200px] transition-all">
+                            {isGenerating && !pendingAiContent ? (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
+                                <div className="flex gap-1">
+                                  {[0, 1, 2].map(i => (
+                                    <motion.div
+                                      key={i}
+                                      animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
+                                      transition={{ repeat: Infinity, duration: 1, delay: i * 0.2 }}
+                                      className="w-2 h-2 bg-brand-900 rounded-full"
+                                    />
+                                  ))}
+                                </div>
+                                <p className="text-xs text-brand-400 font-medium animate-pulse">AI 正在运行中...</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {isAiWriting ? (
+                                  <div className="prose prose-brand max-w-none font-serif text-lg leading-relaxed text-brand-700 italic opacity-80">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                                      {displayedPendingContent || "等待 AI 运行..."}
+                                    </ReactMarkdown>
+                                    <motion.span
+                                      animate={{ opacity: [0, 1, 0] }}
+                                      transition={{ repeat: Infinity, duration: 0.8 }}
+                                      className="inline-block w-1 h-5 bg-brand-900 ml-1 translate-y-1"
+                                    />
+                                  </div>
+                                ) : (
+                                  <textarea
+                                    value={pendingAiContent}
+                                    onChange={(e) => {
+                                      setPendingAiContent(e.target.value);
+                                      setDisplayedPendingContent(e.target.value);
+                                    }}
+                                    className="w-full min-h-[300px] bg-transparent border-none focus:ring-0 text-lg font-serif leading-relaxed text-brand-800 resize-none custom-scrollbar"
+                                    placeholder="AI 生成的内容将显示在这里，您可以直接修改..."
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )}
 
@@ -2229,174 +2442,306 @@ function AppContent() {
           </div>
         </div>
 
-        {/* Right Sidebar (AI Chapter Expander) */}
+        {/* Right Sidebar (AI Assistant & Chat Panel) */}
         <AnimatePresence>
-          {isRightSidebarOpen && activeTab === ContentType.CHAPTER && activeChapter && (
+          {isRightSidebarOpen && (
             <motion.div
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 360, opacity: 1 }}
+              animate={{ width: 420, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="border-l border-brand-200/50 bg-white flex flex-col z-20 shadow-[-10px_0_20px_rgba(0,0,0,0.02)]"
+              className="border-l border-brand-200/50 bg-brand-50/10 flex flex-col h-full z-20 shadow-[-10px_0_20px_rgba(0,0,0,0.02)] relative"
             >
-              <div className="p-5 border-b border-brand-200/50 flex items-center justify-between bg-brand-50/30">
-                <div className="flex items-center gap-2 text-brand-900">
-                  <Sliders size={16} />
-                  <h3 className="font-bold text-sm">AI 章节扩写</h3>
+              {/* Sidebar Header */}
+              <div className="p-4 border-b border-brand-200/50 flex items-center justify-between bg-white backdrop-blur-sm sticky top-0 z-10 shrink-0">
+                <div className="flex items-center gap-2.5 text-brand-900">
+                  <Brain size={18} className="text-black animate-pulse" />
+                  <div>
+                    <h3 className="font-bold text-sm">AI 联手创作空间</h3>
+                    <p className="text-[10px] text-brand-400">大纲、设定与灵感全景对话</p>
+                  </div>
                 </div>
-                <button 
-                  onClick={() => setIsRightSidebarOpen(false)}
-                  className="p-1.5 text-brand-400 hover:text-brand-900 hover:bg-white rounded-lg transition-all"
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      if (confirm("是否确认清空对话历史纪录？")) {
+                        setChatMessages([
+                          {
+                            id: 'welcome',
+                            role: 'assistant',
+                            content: `对话纪录已清空。🧠\n有什么我可以帮你的？你可以随时通过下方的快捷指令让我协助，或直接对我说：“帮我接续当前这章怎么写下去”。`,
+                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          }
+                        ]);
+                      }
+                    }}
+                    className="text-[10px] font-bold uppercase tracking-widest text-brand-400 hover:text-black transition-colors"
+                  >
+                    清空
+                  </button>
+                  <button 
+                    onClick={() => setIsRightSidebarOpen(false)}
+                    className="p-1.5 text-brand-400 hover:text-brand-900 hover:bg-brand-100 rounded-lg transition-all"
+                    title="收回面板"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat & Thought History Area */}
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-5 flex flex-col justify-start">
+                
+                {/* Collapsible Expansion Tool (only when on chapter view) */}
+                {activeTab === ContentType.CHAPTER && activeChapter && (
+                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-brand-100 flex flex-col gap-2.5 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-brand-500 flex items-center gap-1.5">
+                        <Sliders size={12} className="text-black" /> 核心情节大纲扩写助理
+                      </div>
+                      <span className="text-[9px] text-brand-400">一键演化正文</span>
+                    </div>
+                    
+                    <textarea
+                      value={activeChapter.draft || ''}
+                      onChange={(e) => updateChapter(activeChapter.id, { draft: e.target.value })}
+                      placeholder="在此输入你要在这一章里发生的核心情节大纲（例如：'林平之拜入华山派，陆大有因不服气发起了一场切切磋，令狐冲在旁边喝酒围观...'）"
+                      className="w-full h-16 p-3 bg-brand-50/50 border border-brand-100 rounded-xl text-xs text-brand-800 resize-none focus:ring-1 focus:ring-brand-900/10 transition-all custom-scrollbar leading-relaxed"
+                    />
+                    
+                    <button
+                      onClick={handleAiExpandChapter}
+                      disabled={isGenerating || !activeChapter.draft?.trim()}
+                      className="bg-black text-white hover:bg-brand-800 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-sm"
+                    >
+                      {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                      一键扩写章节正文
+                    </button>
+                  </div>
+                )}
+
+                {/* Chat Messages Feed */}
+                <div className="space-y-4 flex-1 flex flex-col justify-start">
+                  {chatMessages.map((message) => {
+                    const isUser = message.role === 'user';
+                    const isCollapsed = collapsedThoughts[message.id] ?? false;
+
+                    return (
+                      <div 
+                        key={message.id} 
+                        className={cn(
+                          "flex flex-col max-w-[90%] gap-1",
+                          isUser ? "self-end items-end ml-auto" : "self-start items-start mr-auto"
+                        )}
+                      >
+                        {/* Sender info */}
+                        <div className="text-[9px] text-brand-400 px-1 flex items-center gap-1.5 label-section">
+                          <span>{isUser ? '我' : 'AI 写作导师'}</span>
+                          <span>•</span>
+                          <span>{message.timestamp}</span>
+                        </div>
+
+                        {/* Thought process card (Gemini style) */}
+                        {message.thought && (
+                          <div className="w-full bg-amber-50/50 border border-amber-100/70 rounded-2xl p-3 flex flex-col gap-2 text-amber-900/95 transition-all text-xs">
+                            <button
+                              onClick={() => setCollapsedThoughts(prev => ({ ...prev, [message.id]: !isCollapsed }))}
+                              className="flex items-center justify-between font-bold text-[9px] tracking-wider uppercase text-amber-700 w-full hover:text-amber-900 transition-colors"
+                            >
+                              <span className="flex items-center gap-1">
+                                <Brain size={12} className="animate-pulse" />
+                                {isCollapsed ? "展开 AI 深度思考构思" : "收起 AI 写作动机与策略"}
+                              </span>
+                              <span>{isCollapsed ? "[+]" : "[-]"}</span>
+                            </button>
+                            
+                            {!isCollapsed && (
+                              <div className="leading-relaxed whitespace-pre-line text-amber-800 border-l-2 border-amber-200/80 pl-2 mt-1 opacity-90 text-[11px] font-mono">
+                                {message.thought}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Message content bubble */}
+                        {message.isGenerating && !message.content ? (
+                          <div className="bg-brand-100/50 border border-brand-200/50 rounded-2xl px-4 py-3 min-w-[80px] flex items-center justify-center">
+                            <div className="flex gap-1">
+                              {[0, 1, 2].map(i => (
+                                <motion.div
+                                  key={i}
+                                  animate={{ scale: [1, 1.3, 1], opacity: [0.3, 1, 0.3] }}
+                                  transition={{ repeat: Infinity, duration: 1, delay: i * 0.2 }}
+                                  className="w-1.5 h-1.5 bg-black rounded-full"
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ) : message.content ? (
+                          <div 
+                            className={cn(
+                              "rounded-3xl px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.01)] border text-xs leading-relaxed",
+                              isUser 
+                                ? "bg-black text-white border-black rounded-tr-sm" 
+                                : "bg-white text-brand-800 border-brand-200/60 rounded-tl-sm whitespace-pre-wrap font-sans"
+                            )}
+                          >
+                            {!isUser ? (
+                              <div className="markdown-body prose-sm font-sans text-brand-800">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                                  {message.content}
+                                </ReactMarkdown>
+                              </div>
+                            ) : (
+                              message.content
+                            )}
+
+                            {/* Adopt Actions under AI responses inside current active chapter */}
+                            {!isUser && activeTab === ContentType.CHAPTER && activeChapter && message.id !== 'welcome' && (
+                              <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-brand-100 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    const currentContent = activeChapter.content || '';
+                                    const nextContent = currentContent + (currentContent ? '\n\n' : '') + message.content;
+                                    updateChapter(activeChapter.id, { content: nextContent });
+                                    showStatus('已成功将 AI 创作正文追加写入该章节末尾！', 'success');
+                                  }}
+                                  className="text-[10px] font-bold bg-white text-black border border-black hover:bg-black hover:text-white px-2.5 py-1 rounded-full transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0"
+                                >
+                                  <Plus size={10} /> 追加到正文
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    updateChapter(activeChapter.id, { draft: message.content });
+                                    showStatus('已将此段灵感同步为该章的情理大纲。', 'success');
+                                  }}
+                                  className="text-[10px] font-bold bg-white text-brand-600 border border-brand-200 hover:border-black hover:text-black px-2.5 py-1 rounded-full transition-all flex items-center gap-1 shadow-sm shrink-0"
+                                >
+                                  设为大纲
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(message.content);
+                                    showStatus('内容已复制。', 'success');
+                                  }}
+                                  className="text-[9px] text-brand-405 hover:text-black p-1 transition-colors ml-auto flex items-center gap-1"
+                                  title="复制正文"
+                                >
+                                  <Copy size={11} /> 复制
+                                </button>
+                              </div>
+                            )}
+
+                            {!isUser && (activeTab !== ContentType.CHAPTER || !activeChapter) && message.id !== 'welcome' && (
+                              <div className="flex justify-end mt-2 pt-1 border-t border-brand-100/50 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(message.content);
+                                    showStatus('文本已复制到剪贴板。', 'success');
+                                  }}
+                                  className="text-[10px] font-bold text-brand-500 hover:text-black flex items-center gap-1.5 p-1 transition-colors"
+                                >
+                                  <Copy size={11} /> 复制文本
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Invisible anchor for scrolling */}
+                  <div ref={messagesEndRef} />
+                </div>
+              </div>
+
+              {/* Quick Prompt Bar Shortcuts */}
+              <div className="px-4 py-2 bg-white border-t border-brand-100 flex items-center gap-2 overflow-x-auto custom-scrollbar shrink-0">
+                {activeTab === ContentType.CHAPTER && activeChapter && (
+                  <button
+                    onClick={() => handleSendChatMessage("我现在卡文了，请结合目前的情感和大纲续写约500字。紧接最新正文的最后一行段落，自然、连贯地展开下一阶情节，注重角色的台词交织。")}
+                    className="text-[10px] font-medium bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 px-3 py-1.5 rounded-full transition-all shrink-0 active:scale-95 whitespace-nowrap"
+                  >
+                    🪄 续写当前章
+                  </button>
+                )}
+                <button
+                  onClick={() => handleSendChatMessage("请根据当前的设定和人物卡，为我之后的故事可能发展制造3个充满张力与悬念的【剧情脑洞/逆转创意】。")}
+                  className="text-[10px] font-medium bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-3 py-1.5 rounded-full transition-all shrink-0 active:scale-95 whitespace-nowrap"
                 >
-                  <X size={16} />
+                  💡 剧情脑洞
+                </button>
+                <button
+                  onClick={() => handleSendChatMessage("请详细审阅我的世界观、角色人设和已写完章节，诊断当前是否存在逻辑冲突、吃设定、战力崩溃或人设立场前后矛盾？请生成诊断报告。")}
+                  className="text-[10px] font-medium bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-3 py-1.5 rounded-full transition-all shrink-0 active:scale-95 whitespace-nowrap"
+                >
+                  🔍 设定一致性诊断
+                </button>
+                <button
+                  onClick={() => handleSendChatMessage("写一段带有极强宿命感或镜头感的重要角色出场/死亡特写描写，文笔要洗练，突出周围冷暖氛围的气氛烘托。")}
+                  className="text-[10px] font-medium bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full transition-all shrink-0 active:scale-95 whitespace-nowrap"
+                >
+                  ⚔️ 氛围特写描写
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-5">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-brand-500 flex items-center gap-2">
-                    <FileText size={12} /> 章节大纲 / 核心情节
-                  </label>
-                  <textarea
-                    value={activeChapter.draft || ''}
-                    onChange={(e) => updateChapter(activeChapter.id, { draft: e.target.value })}
-                    placeholder="在这里写下本章的大纲、你想发生的情节、人物的对话要点等。AI 将根据这些内容以及前情提要为你扩写出完整的章节..."
-                    className="w-full h-64 p-4 bg-brand-50/50 border border-brand-200/50 rounded-xl text-sm text-brand-800 resize-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-900/20 transition-all custom-scrollbar"
+
+              {/* Chat Input Box */}
+              <div className="p-4 bg-white border-t border-brand-200/50 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] shrink-0">
+                <div className="relative group flex items-end gap-2 bg-brand-50/50 rounded-2xl border border-brand-200 focus-within:border-black/30 focus-within:ring-2 focus-within:ring-black/5 transition-all p-1">
+                  <textarea 
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="问设定，改文笔，或命令 AI 直接码字..."
+                    className="w-full bg-transparent px-3 py-3 text-xs border-none focus:outline-none focus:ring-0 resize-none min-h-[44px] max-h-24 custom-scrollbar"
+                    rows={1}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (aiPrompt.trim() && !isGenerating) {
+                          handleSendChatMessage();
+                        }
+                      }
+                    }}
                   />
+                  <div className="flex flex-col gap-1 pb-1 pr-1 shrink-0">
+                    {aiPrompt && (
+                      <button 
+                        onClick={handleOptimizePrompt}
+                        disabled={isGenerating}
+                        className="p-1.5 text-brand-400 hover:text-black transition-colors rounded-lg hover:bg-brand-100"
+                        title="魔法优化提示词"
+                      >
+                        <Zap size={14} />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => handleSendChatMessage()}
+                      disabled={isGenerating || !aiPrompt.trim()}
+                      className="p-2 bg-black text-white rounded-xl hover:bg-brand-800 disabled:opacity-40 transition-all flex items-center justify-center shrink-0 shadow-md"
+                    >
+                      {isGenerating ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                    </button>
+                  </div>
                 </div>
                 
-                <div className="bg-brand-50/50 rounded-xl p-4 border border-brand-100">
-                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-brand-500 mb-3 flex items-center gap-2">
-                    <Zap size={12} /> 扩写设置
-                  </h4>
-                  <div className="space-y-3 text-xs text-brand-600">
-                    <div className="flex items-center justify-between">
-                      <span>参考前情提要</span>
-                      <CheckCircle2 size={14} className={project.storyRecap ? "text-emerald-500" : "text-brand-300"} />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>参考关联设定 ({activeChapter.linkedContextIds?.length || 0})</span>
-                      <CheckCircle2 size={14} className={(activeChapter.linkedContextIds?.length || 0) > 0 ? "text-emerald-500" : "text-brand-300"} />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>应用写作规则 ({project.writingRules.filter(r => r.isActive).length})</span>
-                      <CheckCircle2 size={14} className={project.writingRules.filter(r => r.isActive).length > 0 ? "text-emerald-500" : "text-brand-300"} />
-                    </div>
+                <div className="flex items-center justify-between mt-2.5 px-0.5">
+                  <div className="text-[8px] font-bold uppercase tracking-widest text-brand-400">
+                    Shift+Enter 换行 / Enter 发送
                   </div>
-                </div>
-              </div>
-              <div className="p-5 border-t border-brand-200/50 bg-white">
-                <button
-                  onClick={handleAiExpandChapter}
-                  disabled={isGenerating || !activeChapter.draft?.trim()}
-                  className="btn-primary w-full h-14 flex items-center justify-center gap-3"
-                >
-                  {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                  {isGenerating ? '正在扩写...' : '生成完整章节'}
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        </div>
-
-        {/* AI Assistant Panel */}
-        <AnimatePresence>
-          {isAiAssistantOpen && activeTab === ContentType.CHAPTER && activeId && (
-            <motion.div 
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
-              className="fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-4xl z-40 px-6"
-            >
-              <div className="bg-white/80 backdrop-blur-2xl rounded-[32px] border border-brand-200/50 p-6 shadow-2xl shadow-brand-900/10">
-                <div className="max-w-4xl mx-auto space-y-4">
-                  <div className="flex items-center justify-between px-1">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-brand-900 flex items-center gap-2">
-                        <Sparkles size={14} /> AI 创作助手
-                      </span>
-                      <div className="group relative">
-                        <AlertCircle size={14} className="text-brand-300 cursor-help" />
-                        <div className="absolute bottom-full left-0 mb-3 w-72 p-4 bg-brand-900 text-white text-[11px] rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-30 shadow-2xl border border-white/10 leading-relaxed">
-                          <p className="font-bold mb-2 flex items-center gap-2 text-brand-200">
-                            <Zap size={12} /> 提示词改进建议
-                          </p>
-                          <ul className="space-y-2 opacity-90">
-                            <li><b className="text-brand-200">具体化：</b>不要只说“继续”，试着说“描述艾拉发现徽章时的惊讶表情”。</li>
-                            <li><b className="text-brand-200">设定风格：</b>加入“用忧郁的笔触描述”或“增加对话互动”。</li>
-                            <li><b className="text-brand-200">明确冲突：</b>“突然出现一个黑影袭击了她”比“发生一些意外”更好。</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <button 
-                        onClick={() => setIsAiAssistantOpen(false)}
-                        className="text-brand-400 hover:text-brand-900 transition-colors"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-4">
-                    <div className="flex-1 relative group">
-                      <textarea 
-                        value={aiPrompt}
-                        onChange={(e) => setAiPrompt(e.target.value)}
-                        placeholder="要求 AI 继续、重写或添加特定场景..."
-                        className="w-full bg-brand-100/50 rounded-2xl px-5 py-4 pr-16 text-sm border-none focus:ring-2 focus:ring-brand-900/10 resize-none min-h-[56px] max-h-40 custom-scrollbar transition-all"
-                        rows={1}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleAiGenerate();
-                          }
-                        }}
-                      />
-                      <div className="absolute right-4 bottom-4 flex items-center gap-3">
-                        {aiPrompt && (
-                          <button 
-                            onClick={handleOptimizePrompt}
-                            disabled={isGenerating}
-                            className="p-1.5 text-brand-400 hover:text-black transition-colors"
-                            title="魔法优化"
-                          >
-                            <Zap size={14} />
-                          </button>
-                        )}
-                        <div className="text-[9px] font-bold uppercase tracking-widest text-brand-300 pointer-events-none">
-                          Enter 发送
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <button 
-                        onClick={handleAiGenerate}
-                        disabled={isGenerating}
-                        className={cn(
-                          "btn-primary h-14 px-10 flex items-center gap-3",
-                          isGenerating && "animate-pulse"
-                        )}
-                      >
-                        {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                        <span>{isGenerating ? '创作中' : '生成内容'}</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 px-1">
+                  <div className="flex items-center gap-3">
                     <button 
                       onClick={handleAiPlanNextChapter}
                       disabled={isGenerating}
-                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-1 transition-colors"
                     >
-                      <GitBranch size={12} /> 规划下一章
+                      <GitBranch size={10} /> 规划下一章
                     </button>
-                    <div className="w-1 h-1 rounded-full bg-brand-200" />
                     <button 
                       onClick={handleConsistencyCheck}
                       disabled={isGenerating}
-                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+                      className="text-[9px] font-bold uppercase tracking-widest text-brand-500 hover:text-brand-900 flex items-center gap-1 transition-colors"
                     >
-                      <Search size={12} /> 连贯性检查
+                      <Search size={10} /> 全文分析
                     </button>
                   </div>
                 </div>
@@ -2404,7 +2749,8 @@ function AppContent() {
             </motion.div>
           )}
         </AnimatePresence>
-      </main>
+      </div>
+    </main>
 
       {/* Context Picker Modal */}
       <AnimatePresence>
